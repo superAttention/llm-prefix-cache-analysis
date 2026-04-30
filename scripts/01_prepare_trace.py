@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts._01_prepare_trace_helpers import load_dataset_rows
 from src.trace import build_trace
 
 
@@ -33,15 +34,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    from datasets import load_dataset
     from transformers import AutoTokenizer
 
-    dataset = load_dataset(args.dataset, split="train")
-    if not args.all:
-        dataset = dataset.select(range(min(args.limit, len(dataset))))
-
+    dataset_rows = load_dataset_rows(args.dataset, limit=args.limit, use_all=args.all)
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer)
-    trace = build_trace(list(dataset), tokenizer, order=args.order, seed=args.seed)
+    trace = build_trace(dataset_rows, tokenizer, order=args.order, seed=args.seed)
 
     if args.token_limit is not None:
         trace = truncate_to_token_limit(trace, args.token_limit)
