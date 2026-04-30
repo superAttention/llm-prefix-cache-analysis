@@ -17,14 +17,20 @@ def test_select_peak_gap_cache_size_uses_relative_gap_to_belady():
 
 
 def test_analyze_against_belady_labels_shared_candidates_by_group():
+    # trace: [1],[2],[3],[1],[2] with cache_size=2
+    # At the first eviction (access_index=2, round=0) all three nodes are candidates:
+    #   LRU evicts (1,) — oldest; Belady oracle evicts (3,) — never accessed again (inf)
+    #   → (1,)=A (LRU mistake), (3,)=B (Belady oracle choice), (2,)=D (both retain)
     trace = [[1], [2], [3], [1], [2]]
 
     frame = analyze_against_belady(trace, cache_size=2, strategy_name="lru")
 
     assert {"group", "prefix", "access_index", "tree_depth", "time_to_next_access", "lru_rank_at_evict"} <= set(frame.columns)
-    assert set(frame["group"]) == {"A", "B", "D"}
+    assert "A" in set(frame["group"])
+    assert "B" in set(frame["group"])
 
-    grouped = {tuple(row["prefix"]): row["group"] for row in frame.to_dict("records")}
-    assert grouped[(1,)] == "A"
-    assert grouped[(3,)] == "B"
-    assert grouped[(2,)] == "D"
+    first_eviction = frame[(frame["access_index"] == 2) & (frame["eviction_round"] == 0)]
+    grouped = {tuple(row["prefix"]): row["group"] for row in first_eviction.to_dict("records")}
+    assert grouped[(1,)] == "A"   # LRU evicts (1,); Belady would keep it (next access in 1 step)
+    assert grouped[(3,)] == "B"   # Belady evicts (3,); LRU keeps it (most recent)
+    assert grouped[(2,)] == "D"   # both retain

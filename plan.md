@@ -94,13 +94,17 @@ Output: cache/results.pkl — dict mapping strategy_name → List[(cache_size, h
 Stage 3: Mechanism Analysis (03_mechanism.py)
 Target: Cache size where (TC-Belady_hit_rate - LRU_hit_rate) / TC-Belady_hit_rate is maximized.
 
+Approach: Shadow oracle — run ONE strategy simulation; at each eviction ask what TC-Belady would have chosen from the identical candidate leaf pool. This avoids the tree-divergence problem of running two separate simulations (which causes the shared candidate pool to shrink and become biased over time). By construction, |A| == |B| == number of eviction events (one disagreement per eviction, unless both choose the same leaf → group C).
+
 Four comparison groups (defined relative to TC-Belady vs each non-optimal strategy):
 
-A (strategy-mistake): strategy evicts, Belady retains
-B (Belady-mistake): Belady evicts, strategy retains — expected near-empty
-C (agreed-evict): both evict
-D (agreed-retain): both retain
-Per-node metrics recorded for groups A and C:
+A (strategy-mistake): strategy evicts, Belady retains — LRU evicted a node that was still warm
+B (Belady-target): Belady evicts, strategy retains — LRU kept a node that was effectively dead ("false warmth")
+C (agreed-evict): both evict the same leaf
+D (agreed-retain): all other leaves in the pool at that eviction event (both would retain)
+Key empirical finding: Group B clusters at time_since_last_access ≈ 0 with high time_to_next_access — LRU retains recently-accessed nodes it cannot distinguish from nodes that will actually be reused soon. This "false warmth" trap is LRU's primary failure mode.
+
+Per-node metrics recorded for all groups (A, B, C, D):
 
 Field	Definition
 reuse_count_near	Reuses within next N accesses (N = configurable multiplier × number of nodes in cache at eviction time, default multiplier = 10)
@@ -127,9 +131,9 @@ Figure 2 — Mechanism Scatter (Tier 1):
 X-axis: time_since_last_access (LRU's signal)
 Y-axis: time_to_next_access (Belady's signal)
 Each point = one eviction decision
-Red = Group A (strategy-mistake), Gray = Group C (agreed-evict)
+Red = Group A (strategy-mistake), Blue = Group B (Belady-target / false warmth), Gray = Group C (agreed-evict)
 Diagonal y = x reference line
-Hypothesis: red points cluster in high-x / low-y quadrant ("looks cold, actually hot")
+Observed: Group B clusters at time_since_last_access ≈ 0 with high time_to_next_access — LRU's "false warmth" trap (retains recently-accessed nodes that are actually cold); Group A near/below the diagonal — LRU evicted warm nodes that were still coming back
 Figure 2 supplement (Tier 2, if signal is clear):
 
 Distribution of reuse_count_total for A vs C (violin or KDE)
@@ -159,7 +163,7 @@ Verification
 Unit tests: Insert 3 overlapping sequences into radix tree, verify correct prefix matching and hit counts
 TC-Belady sanity check: On a tiny hand-crafted trace with known leaf-constrained optimal, verify TC-Belady achieves it
 Gap curve sanity check: TC-Belady ≥ all strategies at all cache sizes; NaiveLRU ≤ LRU ≤ Random is not guaranteed (Random can be worse); verify LRU > Random
-Mechanism check: Group B (TC-Belady-mistake) should be near-empty by construction
+Mechanism check: |Group A| == |Group B| == number of eviction events by shadow oracle construction (one disagreement per eviction unless both agree → group C)
 Metric divergence check: Token-level and request-level hit rates measured on same trace; confirm they differ (if they're equal, one is buggy)
 End-to-end: Run full pipeline on --limit 100, verify paper/figures/ populated and LaTeX compiles
 Key Dependencies

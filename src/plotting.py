@@ -71,7 +71,7 @@ def plot_mechanism_scatter(
     frame = mechanism[strategy_name].copy()
     fig, ax = plt.subplots(figsize=(7, 5.5))
 
-    for group_name, color in [("A", "tab:red"), ("C", "0.6")]:
+    for group_name, color in [("A", "tab:red"), ("B", "tab:blue"), ("C", "0.6")]:
         subset = frame[frame["group"] == group_name]
         if subset.empty:
             continue

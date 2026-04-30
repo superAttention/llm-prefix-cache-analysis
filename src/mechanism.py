@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from bisect import bisect_right
-from dataclasses import dataclass
 from math import inf
 
 import pandas as pd
@@ -10,13 +9,6 @@ from src.metrics import relative_gap
 from src.simulate import build_strategy_registry
 from src.radix_tree import RadixTree
 
-
-@dataclass(slots=True)
-class EvictionSnapshot:
-    access_index: int
-    eviction_round: int
-    victim_prefix: tuple[int, ...]
-    candidate_metrics: dict[tuple[int, ...], dict[str, object]]
 
 
 def select_peak_gap_cache_size(
@@ -48,87 +40,18 @@ def analyze_against_belady(
     near_window_multiplier: int = 10,
     seed: int = 0,
 ) -> pd.DataFrame:
-    strategy_snapshots = _simulate_eviction_snapshots(
-        trace=trace,
-        cache_size=cache_size,
-        strategy_name=strategy_name,
-        near_window_multiplier=near_window_multiplier,
-        seed=seed,
-    )
-    belady_snapshots = _simulate_eviction_snapshots(
-        trace=trace,
-        cache_size=cache_size,
-        strategy_name="tc_belady",
-        near_window_multiplier=near_window_multiplier,
-        seed=seed,
-    )
+    """Shadow-oracle approach: run one strategy simulation; at each eviction
+    ask what TC-Belady would have chosen from the identical candidate pool.
 
-    belady_by_key = {(snapshot.access_index, snapshot.eviction_round): snapshot for snapshot in belady_snapshots}
-    records: list[dict[str, object]] = []
-
-    for strategy_snapshot in strategy_snapshots:
-        key = (strategy_snapshot.access_index, strategy_snapshot.eviction_round)
-        belady_snapshot = belady_by_key.get(key)
-        if belady_snapshot is None:
-            continue
-
-        shared_prefixes = (
-            strategy_snapshot.candidate_metrics.keys() & belady_snapshot.candidate_metrics.keys()
-        )
-        for prefix in sorted(shared_prefixes):
-            strategy_evicted = prefix == strategy_snapshot.victim_prefix
-            belady_evicted = prefix == belady_snapshot.victim_prefix
-            group = _label_group(strategy_evicted, belady_evicted)
-            metrics = dict(strategy_snapshot.candidate_metrics[prefix])
-            metrics.update(
-                {
-                    "group": group,
-                    "prefix": prefix,
-                    "access_index": strategy_snapshot.access_index,
-                    "eviction_round": strategy_snapshot.eviction_round,
-                    "strategy_name": strategy_name,
-                }
-            )
-            records.append(metrics)
-
-    return pd.DataFrame.from_records(records)
-
-
-def _label_group(strategy_evicted: bool, belady_evicted: bool) -> str:
-    if strategy_evicted and not belady_evicted:
-        return "A"
-    if belady_evicted and not strategy_evicted:
-        return "B"
-    if strategy_evicted and belady_evicted:
-        return "C"
-    return "D"
-
-
-def _simulate_eviction_snapshots(
-    trace: list[list[int]],
-    cache_size: int,
-    strategy_name: str,
-    near_window_multiplier: int,
-    seed: int,
-) -> list[EvictionSnapshot]:
+    This avoids the tree-divergence problem of running two separate simulations:
+    every eviction event produces exactly one Group A node (strategy evicted,
+    Belady would not) and one Group B node (Belady would evict, strategy did
+    not), both drawn from the same tree state at the same moment.
+    """
     registry = build_strategy_registry(seed=seed)
-    if strategy_name == "naive_lru":
-        raise ValueError("Mechanism analysis only supports tree-based strategies")
-
-    if strategy_name == "tc_belady":
-        simulator = RadixTree(token_budget=cache_size, eviction_strategy=None)
-    else:
-        simulator = registry[strategy_name](cache_size)
+    simulator = registry[strategy_name](cache_size)
     access_history = _build_access_history(trace)
-    snapshots: list[EvictionSnapshot] = []
-
-    if strategy_name == "tc_belady":
-        choose_victim = lambda leaves, access_index: max(
-            leaves,
-            key=lambda node: _time_to_next_access(node.prefix, access_history, access_index),
-        )
-    else:
-        choose_victim = simulator.eviction_strategy.get_priority
+    records: list[dict[str, object]] = []
 
     for access_index, tokens in enumerate(trace):
         result = simulator.lookup(tokens, access_index=access_index)
@@ -144,23 +67,43 @@ def _simulate_eviction_snapshots(
                 near_window_multiplier=near_window_multiplier,
             )
 
-            if strategy_name == "tc_belady":
-                victim = choose_victim(leaves, access_index)
-            else:
-                victim = min(leaves, key=choose_victim)
-
-            snapshots.append(
-                EvictionSnapshot(
-                    access_index=access_index,
-                    eviction_round=eviction_round,
-                    victim_prefix=victim.prefix,
-                    candidate_metrics=candidate_metrics,
-                )
+            strategy_victim = min(leaves, key=simulator.eviction_strategy.get_priority)
+            belady_victim = max(
+                leaves,
+                key=lambda node: _time_to_next_access(node.prefix, access_history, access_index),
             )
-            simulator.remove_leaf(victim)
+
+            for node in leaves:
+                strategy_evicted = node.prefix == strategy_victim.prefix
+                belady_evicted = node.prefix == belady_victim.prefix
+                group = _label_group(strategy_evicted, belady_evicted)
+                metrics = dict(candidate_metrics[node.prefix])
+                metrics.update(
+                    {
+                        "group": group,
+                        "prefix": node.prefix,
+                        "access_index": access_index,
+                        "eviction_round": eviction_round,
+                        "strategy_name": strategy_name,
+                    }
+                )
+                records.append(metrics)
+
+            simulator.remove_leaf(strategy_victim)
             eviction_round += 1
 
-    return snapshots
+    return pd.DataFrame.from_records(records)
+
+
+def _label_group(strategy_evicted: bool, belady_evicted: bool) -> str:
+    if strategy_evicted and not belady_evicted:
+        return "A"
+    if belady_evicted and not strategy_evicted:
+        return "B"
+    if strategy_evicted and belady_evicted:
+        return "C"
+    return "D"
+
 
 
 def _build_access_history(trace: list[list[int]]) -> dict[tuple[int, ...], list[int]]:
