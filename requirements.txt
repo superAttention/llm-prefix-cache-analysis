@@ -1,0 +1,8 @@
+datasets
+matplotlib
+numpy
+pandas
+pytest
+torch
+tqdm
+transformers
