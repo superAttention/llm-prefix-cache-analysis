@@ -34,11 +34,20 @@ naive_lru       0.0000    0.0000    0.0000    0.0000    0.0000    0.0000
 Peak gap: 89.0% at cache_size=1654
 
 ## Mechanism Analysis (LRU vs TC-Belady, 10-conv trace at peak-gap cache size)
-Total eviction decision snapshots: 8654
-  Group A — strategy evicts, Belady retains (strategy mistake): 12
-  Group B — Belady evicts, strategy retains (Belady mistake):   25
-  Group C — both evict:                                          6748
-  Group D — both retain:                                         1869
+Method: shadow oracle — one LRU simulation; TC-Belady consulted as oracle at each eviction event.
+|A| == |B| == number of eviction events by construction (one disagreement per eviction unless both agree → C).
 
-Group A (strategy mistakes): median time_since_last_access=1.0, median time_to_next_access=2.5
-Group C (agreed evict):      median time_since_last_access=0.0, median time_to_next_access=4.0
+Total records (all leaves × all eviction events): 28,756
+  Group A — LRU evicts, Belady retains (LRU mistake):   4,466
+  Group B — Belady evicts, LRU retains (false warmth):  4,466
+  Group C — both evict (agreed):                       16,171
+  Group D — both retain (agreed):                       3,653
+
+Group A (LRU mistakes):  median time_since_last_access=1.0,  median time_to_next_access=5.0
+Group B (false warmth):  median time_since_last_access=0.0,  median time_to_next_access=inf
+Group C (agreed evict):  median time_since_last_access=0.0,  median time_to_next_access=inf
+Group D (agreed retain): median time_since_last_access=0.0,  median time_to_next_access=5.0
+
+Key finding: Group B has time_since_last_access=0 (just accessed) but time_to_next_access=inf (never again).
+LRU retains these because recency looks good; Belady evicts them because the future is dead.
+This "false warmth" is LRU's primary failure mode on this workload.
