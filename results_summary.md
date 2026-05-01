@@ -39,6 +39,7 @@ filo            0.0024    0.0056    0.0118    0.0393    0.1476    0.6056
 - `random` peak relative gap: `82.0%` at `1271` blocks.
 - `lfu` and `slru` peak relative gap: `92.2%` at `5061` blocks.
 - `mru` and `filo` peak relative gap: `94.7%` at `5061` blocks.
+- `priority` should not be read as an independent result here: the trace carries no request-priority metadata, so it reduces to plain `lru` under the SGLang priority rule.
 - Full-cache convergence occurs at `319,862` blocks.
 
 ## Mechanism Analysis (`lru` vs `tc_belady`)
@@ -93,8 +94,11 @@ Interpretation:
 ## Runtime
 - Benchmark command used six log-spaced cache sizes:
   `319 1271 5061 20160 80302 319862`
-- Full all-policy sweep completed and produced:
+- Main sweep artifact:
   `cache/sharegpt-results-300-llama-alt-benchmark.pkl`
+- Matching follow-up heuristic artifact:
+  `cache/sharegpt-results-300-llama-alt-depth.pkl`
+- `depth_lru` was run afterward on the same trace and same cache sizes, then folded into the comparison tables above.
 - Observed runtime: `353.70s real`, `331.60s user`, `13.15s sys`
 
 ## Notes

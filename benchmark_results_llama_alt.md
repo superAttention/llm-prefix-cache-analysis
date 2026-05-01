@@ -18,9 +18,11 @@ Date: 2026-04-30
 - Unique block prefixes: `319,862`
 
 ## Runtime
-- Command:
+- Main sweep command:
   `python scripts/02_simulate.py --trace cache/sharegpt-trace-300-llama-alt.pkl --output cache/sharegpt-results-300-llama-alt-benchmark.pkl --page-size 1 --strategies lru lfu fifo mru filo slru priority random tc_belady --sizes 319 1271 5061 20160 80302 319862`
-- Simulator completed successfully and wrote the result pickle.
+- Follow-up heuristic run:
+  `python scripts/02_simulate.py --trace cache/sharegpt-trace-300-llama-alt.pkl --output cache/sharegpt-results-300-llama-alt-depth.pkl --page-size 1 --strategies depth_lru --sizes 319 1271 5061 20160 80302 319862`
+- The comparison tables below use the main benchmark artifact plus the matching `depth_lru` follow-up run at the same trace and cache sizes.
 - Timing wrapper: `353.70s real`, `331.60s user`, `13.15s sys`
 - Note: `/usr/bin/time` returned a sandbox-specific `sysctl kern.clockrate` warning after the run, which is why the shell exit code was nonzero even though the benchmark artifact is valid.
 
@@ -58,7 +60,8 @@ Using `(tc_belady - baseline) / tc_belady` on token hit rate:
 ## Notes
 - `tc_belady` dominates every online policy at every reported cache size under the fixed-block model.
 - `depth_lru` is consistently but only slightly better than plain `lru`; it does not materially close the gap.
-- `lru`, `fifo`, and `priority` are numerically identical on this trace.
+- `priority` matches SGLang's priority-aware eviction rule, but this trace has no request-priority metadata, so every node receives priority `0` and the policy collapses to plain `lru` here.
+- `lru`, `fifo`, and `priority` are therefore numerically identical in this benchmark.
 - `lfu` and `slru` are numerically identical on this trace.
 - `mru` and `filo` are numerically identical on this trace.
 - Full-cache convergence occurs at `319,862` blocks, which matches the unique-block-prefix count for this trace.
