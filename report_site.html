@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prefix Cache Eviction Gap</title>
+  <style>
+    :root {
+      --bg: #f4efe5;
+      --paper: #fffaf0;
+      --ink: #1d1b18;
+      --muted: #645e55;
+      --line: #d6c8af;
+      --accent: #9b3d21;
+      --accent-soft: #f5d9c8;
+      --blue: #1f5f8b;
+      --blue-soft: #dcecf7;
+      --green: #4f6b31;
+      --green-soft: #e6efda;
+      --gold: #8a6a15;
+      --gold-soft: #f3ead0;
+      --shadow: 0 18px 50px rgba(29, 27, 24, 0.08);
+      --mono: "SFMono-Regular", "Menlo", "Monaco", monospace;
+      --sans: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top right, rgba(155, 61, 33, 0.12), transparent 28%),
+        radial-gradient(circle at left 20%, rgba(31, 95, 139, 0.08), transparent 30%),
+        linear-gradient(180deg, #f7f1e8 0%, var(--bg) 100%);
+      font-family: var(--sans);
+      line-height: 1.55;
+    }
+
+    a { color: inherit; }
+    code, pre, .mono {
+      font-family: var(--mono);
+      font-size: 0.95em;
+    }
+
+    .shell {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 32px 20px 72px;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, rgba(255, 250, 240, 0.96), rgba(255, 248, 234, 0.96));
+      border: 1px solid rgba(155, 61, 33, 0.18);
+      box-shadow: var(--shadow);
+      border-radius: 28px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, transparent 0%, rgba(155, 61, 33, 0.08) 50%, transparent 100%),
+        linear-gradient(0deg, transparent 0%, rgba(31, 95, 139, 0.05) 100%);
+      pointer-events: none;
+    }
+
+    .hero-inner {
+      position: relative;
+      padding: 40px 40px 34px;
+      display: grid;
+      grid-template-columns: 1.25fr 0.9fr;
+      gap: 28px;
+    }
+
+    h1, h2, h3 {
+      line-height: 1.1;
+      margin: 0 0 14px;
+      font-weight: 700;
+    }
+
+    h1 {
+      font-size: clamp(2.6rem, 5vw, 4.8rem);
+      letter-spacing: -0.04em;
+      max-width: 12ch;
+    }
+
+    h2 {
+      font-size: clamp(1.55rem, 2vw, 2.2rem);
+      letter-spacing: -0.03em;
+      margin-bottom: 12px;
+    }
+
+    h3 {
+      font-size: 1.08rem;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--accent);
+    }
+
+    .kicker {
+      display: inline-block;
+      margin-bottom: 14px;
+      padding: 7px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(155, 61, 33, 0.2);
+      background: rgba(155, 61, 33, 0.08);
+      font-size: 0.92rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .lede {
+      max-width: 60ch;
+      font-size: 1.08rem;
+      color: var(--muted);
+    }
+
+    .hero-metrics {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      align-content: start;
+    }
+
+    .metric-card {
+      padding: 16px;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(31, 95, 139, 0.14);
+      border-radius: 18px;
+    }
+
+    .metric-card .value {
+      display: block;
+      font-size: 1.7rem;
+      letter-spacing: -0.04em;
+      font-weight: 700;
+    }
+
+    .metric-card .label {
+      color: var(--muted);
+      font-size: 0.96rem;
+    }
+
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      margin: 18px 0 26px;
+      backdrop-filter: blur(14px);
+      background: rgba(255, 250, 240, 0.82);
+      border: 1px solid rgba(29, 27, 24, 0.08);
+      border-radius: 18px;
+      box-shadow: 0 10px 30px rgba(29, 27, 24, 0.06);
+      padding: 10px 12px;
+    }
+
+    .nav ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .nav a {
+      display: inline-block;
+      padding: 8px 12px;
+      border-radius: 999px;
+      text-decoration: none;
+      border: 1px solid rgba(29, 27, 24, 0.08);
+      background: rgba(255, 255, 255, 0.55);
+    }
+
+    .section {
+      margin-top: 22px;
+      padding: 28px;
+      background: rgba(255, 250, 240, 0.88);
+      border: 1px solid rgba(29, 27, 24, 0.08);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+    }
+
+    .section-grid {
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 24px;
+      align-items: start;
+    }
+
+    .callout, .mini-panel {
+      border-radius: 20px;
+      padding: 18px;
+      border: 1px solid rgba(29, 27, 24, 0.08);
+    }
+
+    .callout {
+      background: linear-gradient(180deg, rgba(245, 217, 200, 0.65), rgba(255, 250, 240, 0.92));
+      border-color: rgba(155, 61, 33, 0.16);
+    }
+
+    .callout.blue {
+      background: linear-gradient(180deg, rgba(220, 236, 247, 0.8), rgba(255, 250, 240, 0.94));
+      border-color: rgba(31, 95, 139, 0.18);
+    }
+
+    .callout.green {
+      background: linear-gradient(180deg, rgba(230, 239, 218, 0.8), rgba(255, 250, 240, 0.94));
+      border-color: rgba(79, 107, 49, 0.18);
+    }
+
+    .mini-panel {
+      background: rgba(255, 255, 255, 0.55);
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .chip {
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 0.92rem;
+      border: 1px solid rgba(29, 27, 24, 0.08);
+      background: rgba(255, 255, 255, 0.7);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 0.95rem;
+    }
+
+    th, td {
+      padding: 10px 10px;
+      border-bottom: 1px solid rgba(29, 27, 24, 0.1);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    thead th {
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+
+    .benchmark-table th:not(:first-child),
+    .benchmark-table td:not(:first-child),
+    .numeric {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .equation {
+      display: inline-block;
+      margin: 10px 0 6px;
+      padding: 10px 14px;
+      background: rgba(255, 255, 255, 0.82);
+      border: 1px solid rgba(29, 27, 24, 0.1);
+      border-radius: 14px;
+      font-family: var(--mono);
+    }
+
+    .svg-wrap {
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.7);
+      border-radius: 20px;
+      border: 1px solid rgba(29, 27, 24, 0.08);
+      overflow: hidden;
+    }
+
+    svg {
+      width: 100%;
+      height: auto;
+      display: block;
+      font-family: var(--mono);
+    }
+
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .legend-item {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      font-size: 0.94rem;
+    }
+
+    .swatch {
+      width: 14px;
+      height: 14px;
+      border-radius: 4px;
+      margin-top: 4px;
+      flex: 0 0 auto;
+    }
+
+    .two-col-list {
+      columns: 2;
+      column-gap: 26px;
+      margin: 14px 0 0;
+      padding-left: 18px;
+    }
+
+    .two-col-list li {
+      margin-bottom: 8px;
+      break-inside: avoid;
+    }
+
+    .footer-note {
+      color: var(--muted);
+      font-size: 0.94rem;
+    }
+
+    @media (max-width: 980px) {
+      .hero-inner,
+      .section-grid,
+      .legend {
+        grid-template-columns: 1fr;
+      }
+
+      .two-col-list {
+        columns: 1;
+      }
+    }
+
+    @media (max-width: 680px) {
+      .shell { padding: 18px 12px 40px; }
+      .hero-inner, .section { padding: 20px; }
+      .hero-metrics { grid-template-columns: 1fr 1fr; }
+      .nav ul { gap: 8px; }
+      .nav a { padding: 7px 10px; font-size: 0.92rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="hero" id="top">
+      <div class="hero-inner">
+        <div>
+          <div class="kicker">Technical Explainer</div>
+          <h1>Prefix Cache Eviction Gap</h1>
+          <p class="lede">
+            This page explains the current fixed-block ShareGPT study end to end:
+            how the trace is built, how the radix cache is modeled, why the offline
+            oracle is defined the way it is, how the shadow-oracle mechanism
+            analysis works, and what motivated the <code>depth_lru</code> heuristic.
+          </p>
+          <div class="chips">
+            <span class="chip">Dataset: ShareGPT cached local snapshot</span>
+            <span class="chip">Tokenizer: Llama-3 alternate tokenizer</span>
+            <span class="chip">Model: fixed-size block radix tree</span>
+            <span class="chip">Benchmark: 300 conversations</span>
+          </div>
+        </div>
+        <div class="hero-metrics">
+          <div class="metric-card">
+            <span class="value">300</span>
+            <span class="label">conversations</span>
+          </div>
+          <div class="metric-card">
+            <span class="value">978</span>
+            <span class="label">accesses</span>
+          </div>
+          <div class="metric-card">
+            <span class="value">811,050</span>
+            <span class="label">total requested tokens</span>
+          </div>
+          <div class="metric-card">
+            <span class="value">319,862</span>
+            <span class="label">unique block prefixes</span>
+          </div>
+          <div class="metric-card">
+            <span class="value">80.2%</span>
+            <span class="label">LRU peak gap</span>
+          </div>
+          <div class="metric-card">
+            <span class="value">79.3%</span>
+            <span class="label">DepthLRU peak gap</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <nav class="nav" aria-label="Section navigation">
+      <ul>
+        <li><a href="#abstract">Abstract</a></li>
+        <li><a href="#trace-construction">Trace</a></li>
+        <li><a href="#cache-model">Cache Model</a></li>
+        <li><a href="#policies">Policies</a></li>
+        <li><a href="#offline-oracle">Oracle</a></li>
+        <li><a href="#mechanism-analysis">Mechanism</a></li>
+        <li><a href="#heuristic-motivation">DepthLRU</a></li>
+        <li><a href="#results">Results</a></li>
+        <li><a href="#fidelity">Fidelity</a></li>
+      </ul>
+    </nav>
+
+    <section class="section" id="abstract">
+      <h2>Abstract</h2>
+      <div class="section-grid">
+        <div>
+          <p>
+            The core question is straightforward: given a realistic multi-turn chat
+            workload, how much headroom exists between common online prefix-cache
+            eviction policies and an offline upper bound that sees the future?
+          </p>
+          <p>
+            The current repository answers that question under a deliberately clean
+            model. Each cached radix node stores exactly one fixed-size block. The
+            reported benchmark uses <code>page_size = 1</code>, so one block equals
+            one token for accounting, while still preserving the explicit
+            block-eviction semantics needed for a well-defined oracle.
+          </p>
+          <p>
+            The key result is large: <code>lru</code> reaches a peak relative gap of
+            <strong>80.2%</strong> versus <code>tc_belady</code> at
+            <strong>1271 blocks</strong>. The main failure mode is not random noise.
+            It is a systematic tendency to keep freshly touched deep tail blocks that
+            are already dead, which motivated the <code>depth_lru</code> heuristic.
+          </p>
+        </div>
+        <aside class="callout">
+          <h3>Research Scope</h3>
+          <p>
+            This is not a full production simulator of all SGLang features. It is a
+            report-oriented eviction study under a fixed-block, page-aligned radix
+            model with a tree-constrained offline oracle and a shadow-oracle
+            mechanism analysis.
+          </p>
+          <div class="equation">relative_gap = (tc_belady - baseline) / tc_belady</div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section" id="trace-construction">
+      <h2>Trace Construction</h2>
+      <div class="section-grid">
+        <div>
+          <p>
+            The input data is a cached local snapshot of
+            <code>anon8231489123/ShareGPT_Vicuna_unfiltered</code>. Each conversation
+            is processed in order. Every human turn becomes one access, and the
+            accessed object is the entire accumulated prompt prefix up to that turn.
+          </p>
+          <p>
+            This matters because the cache is not serving isolated utterances. It is
+            serving prefixes that grow over time. That means a later request can hit
+            a long shared prefix even when the final tail diverges.
+          </p>
+          <p>
+            Across conversations, accesses are globally interleaved rather than
+            concatenated sequentially. The resulting benchmark trace contains
+            <strong>300 conversations</strong> and <strong>978 accesses</strong>.
+          </p>
+          <div class="mini-panel">
+            <strong>Tokenizer.</strong>
+            The current benchmark uses
+            <code>NousResearch/Meta-Llama-3-8B-Alternate-Tokenizer</code>. The
+            serialized trace remains token-level. Blocking is applied later inside the
+            simulator.
+          </div>
+        </div>
+        <div class="svg-wrap">
+          <svg viewBox="0 0 720 360" role="img" aria-label="Conversation to interleaved trace diagram">
+            <defs>
+              <linearGradient id="traceBg" x1="0" x2="1">
+                <stop offset="0%" stop-color="#f5d9c8"/>
+                <stop offset="100%" stop-color="#dcecf7"/>
+              </linearGradient>
+            </defs>
+            <rect x="0" y="0" width="720" height="360" rx="20" fill="url(#traceBg)"/>
+            <text x="28" y="38" font-size="20" fill="#1d1b18">Human turns become accesses over accumulated prompt prefixes</text>
+
+            <rect x="24" y="70" width="290" height="110" rx="16" fill="#fffaf0" stroke="#9b3d21"/>
+            <text x="42" y="96" font-size="16" fill="#9b3d21">Conversation A</text>
+            <text x="42" y="126" font-size="14" fill="#1d1b18">A1 human: "How does radix eviction work?"</text>
+            <text x="42" y="150" font-size="14" fill="#1d1b18">A2 assistant: ...</text>
+            <text x="42" y="174" font-size="14" fill="#1d1b18">A3 human: "What about Belady?"</text>
+
+            <rect x="24" y="198" width="290" height="110" rx="16" fill="#fffaf0" stroke="#1f5f8b"/>
+            <text x="42" y="224" font-size="16" fill="#1f5f8b">Conversation B</text>
+            <text x="42" y="254" font-size="14" fill="#1d1b18">B1 human: "Explain LRU failure modes"</text>
+            <text x="42" y="278" font-size="14" fill="#1d1b18">B2 assistant: ...</text>
+            <text x="42" y="302" font-size="14" fill="#1d1b18">B3 human: "Can depth help?"</text>
+
+            <path d="M336 120 C420 120 430 90 500 90" fill="none" stroke="#9b3d21" stroke-width="3"/>
+            <path d="M336 250 C420 250 430 130 500 130" fill="none" stroke="#1f5f8b" stroke-width="3"/>
+            <path d="M336 166 C420 166 430 170 500 170" fill="none" stroke="#9b3d21" stroke-width="3" stroke-dasharray="6 6"/>
+            <path d="M336 296 C420 296 430 210 500 210" fill="none" stroke="#1f5f8b" stroke-width="3" stroke-dasharray="6 6"/>
+
+            <rect x="500" y="58" width="196" height="236" rx="18" fill="#fffaf0" stroke="#1d1b18"/>
+            <text x="522" y="88" font-size="18" fill="#1d1b18">Global interleaved trace</text>
+            <rect x="520" y="104" width="156" height="28" rx="10" fill="#f5d9c8"/>
+            <text x="532" y="123" font-size="14" fill="#1d1b18">Access 0: A1 prefix</text>
+            <rect x="520" y="144" width="156" height="28" rx="10" fill="#dcecf7"/>
+            <text x="532" y="163" font-size="14" fill="#1d1b18">Access 1: B1 prefix</text>
+            <rect x="520" y="184" width="156" height="28" rx="10" fill="#f5d9c8"/>
+            <text x="532" y="203" font-size="14" fill="#1d1b18">Access 2: A3 prefix</text>
+            <rect x="520" y="224" width="156" height="28" rx="10" fill="#dcecf7"/>
+            <text x="532" y="243" font-size="14" fill="#1d1b18">Access 3: B3 prefix</text>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="cache-model">
+      <h2>Fixed-Block Cache Model</h2>
+      <div class="section-grid">
+        <div>
+          <p>
+            The simulator uses a fixed-size block radix tree. Each node stores
+            exactly one block. Prefix matching only counts on full block boundaries.
+            A trailing partial block is still a block and still consumes one unit of
+            cache capacity.
+          </p>
+          <p>
+            In the current benchmark, <code>page_size = 1</code>. That removes
+            internal fragmentation from the reported run while keeping the explicit
+            block semantics that make the offline oracle tractable.
+          </p>
+          <div class="callout blue">
+            <h3>Accounting Rule</h3>
+            <p>
+              Benefit is measured in reused tokens and reused full requests. Cost is
+              measured in blocks. Under the current run, the full-cache point is
+              <strong>319,862 blocks</strong>, which matches the number of unique
+              block prefixes in the trace.
+            </p>
+          </div>
+          <ul class="two-col-list">
+            <li>one radix node per block</li>
+            <li>block budget rather than token budget</li>
+            <li>leaf-only online eviction</li>
+            <li>full-block prefix hits only</li>
+            <li>same tree model for online and offline policies</li>
+            <li>explicit candidate leaf set at eviction time</li>
+          </ul>
+        </div>
+        <div class="svg-wrap">
+          <svg viewBox="0 0 720 430" role="img" aria-label="Token to block to radix tree diagram">
+            <rect x="0" y="0" width="720" height="430" rx="20" fill="#fffaf0"/>
+            <text x="26" y="36" font-size="20" fill="#1d1b18">Token stream -> blocks -> radix path</text>
+
+            <text x="34" y="78" font-size="15" fill="#645e55">Request tokens</text>
+            <rect x="34" y="92" width="52" height="42" rx="8" fill="#f5d9c8"/><text x="50" y="119" font-size="15">t1</text>
+            <rect x="92" y="92" width="52" height="42" rx="8" fill="#f5d9c8"/><text x="108" y="119" font-size="15">t2</text>
+            <rect x="150" y="92" width="52" height="42" rx="8" fill="#f5d9c8"/><text x="166" y="119" font-size="15">t3</text>
+            <rect x="208" y="92" width="52" height="42" rx="8" fill="#f5d9c8"/><text x="224" y="119" font-size="15">t4</text>
+            <rect x="266" y="92" width="52" height="42" rx="8" fill="#f5d9c8"/><text x="282" y="119" font-size="15">t5</text>
+
+            <text x="34" y="182" font-size="15" fill="#645e55">Current benchmark: page_size = 1</text>
+            <rect x="34" y="196" width="52" height="42" rx="8" fill="#dcecf7"/><text x="45" y="223" font-size="15">(t1)</text>
+            <rect x="92" y="196" width="52" height="42" rx="8" fill="#dcecf7"/><text x="103" y="223" font-size="15">(t2)</text>
+            <rect x="150" y="196" width="52" height="42" rx="8" fill="#dcecf7"/><text x="161" y="223" font-size="15">(t3)</text>
+            <rect x="208" y="196" width="52" height="42" rx="8" fill="#dcecf7"/><text x="219" y="223" font-size="15">(t4)</text>
+            <rect x="266" y="196" width="52" height="42" rx="8" fill="#dcecf7"/><text x="277" y="223" font-size="15">(t5)</text>
+
+            <line x1="340" y1="110" x2="420" y2="110" stroke="#8a6a15" stroke-width="3"/>
+            <line x1="340" y1="214" x2="420" y2="214" stroke="#8a6a15" stroke-width="3"/>
+            <text x="350" y="98" font-size="14" fill="#8a6a15">chunk into blocks</text>
+            <text x="350" y="202" font-size="14" fill="#8a6a15">insert as radix nodes</text>
+
+            <circle cx="500" cy="96" r="22" fill="#fff" stroke="#1d1b18"/>
+            <text x="494" y="101" font-size="15">R</text>
+            <circle cx="570" cy="146" r="22" fill="#dcecf7" stroke="#1f5f8b"/>
+            <text x="557" y="151" font-size="15">(t1)</text>
+            <circle cx="620" cy="206" r="22" fill="#dcecf7" stroke="#1f5f8b"/>
+            <text x="607" y="211" font-size="15">(t2)</text>
+            <circle cx="570" cy="266" r="22" fill="#dcecf7" stroke="#1f5f8b"/>
+            <text x="557" y="271" font-size="15">(t3)</text>
+            <circle cx="620" cy="326" r="22" fill="#dcecf7" stroke="#1f5f8b"/>
+            <text x="607" y="331" font-size="15">(t4)</text>
+            <circle cx="570" cy="386" r="22" fill="#dcecf7" stroke="#1f5f8b"/>
+            <text x="557" y="391" font-size="15">(t5)</text>
+
+            <line x1="516" y1="109" x2="554" y2="134" stroke="#1d1b18" stroke-width="2.4"/>
+            <line x1="585" y1="160" x2="605" y2="191" stroke="#1d1b18" stroke-width="2.4"/>
+            <line x1="607" y1="223" x2="583" y2="248" stroke="#1d1b18" stroke-width="2.4"/>
+            <line x1="585" y1="282" x2="605" y2="309" stroke="#1d1b18" stroke-width="2.4"/>
+            <line x1="607" y1="343" x2="583" y2="368" stroke="#1d1b18" stroke-width="2.4"/>
+
+            <text x="452" y="48" font-size="14" fill="#645e55">Each node is one block</text>
+            <text x="452" y="412" font-size="14" fill="#645e55">Eviction occurs at leaf blocks only</text>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="policies">
+      <h2>Eviction Policies Under Comparison</h2>
+      <p>
+        The simulator supports standard online policies, one heuristic, and one
+        offline upper bound. All online policies operate on the same block radix
+        tree and choose from the same current leaf set.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Policy</th>
+            <th>Priority key</th>
+            <th>Interpretation</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>lru</code></td><td><code>last_access_index</code></td><td>Evict oldest-by-recency leaf block.</td></tr>
+          <tr><td><code>lfu</code></td><td><code>(access_count, last_access_index)</code></td><td>Evict low-frequency leaves first, then old ones.</td></tr>
+          <tr><td><code>fifo</code></td><td><code>created_at</code></td><td>Evict oldest inserted leaf block.</td></tr>
+          <tr><td><code>mru</code></td><td><code>-last_access_index</code></td><td>Evict most recent leaves first.</td></tr>
+          <tr><td><code>filo</code></td><td><code>-created_at</code></td><td>Evict newest inserted leaves first.</td></tr>
+          <tr><td><code>slru</code></td><td><code>(segment, last_access_index)</code></td><td>Two-segment recency split using access-count threshold.</td></tr>
+          <tr><td><code>priority</code></td><td><code>(node.priority, last_access_index)</code></td><td>Matches SGLang's priority-aware rule.</td></tr>
+          <tr><td><code>random</code></td><td><code>uniform random</code></td><td>Lower-bound sanity baseline.</td></tr>
+          <tr><td><code>depth_lru</code></td><td><code>last_access_index - alpha * depth</code></td><td>Recency with a depth penalty to fight false warmth.</td></tr>
+          <tr><td><code>tc_belady</code></td><td><code>future next-use distance</code></td><td>Tree-constrained offline oracle under the same block model.</td></tr>
+        </tbody>
+      </table>
+      <div class="callout blue" style="margin-top:16px;">
+        <h3>Priority Policy Note</h3>
+        <p>
+          In SGLang, request metadata can carry a priority value that is propagated
+          into the radix cache. The local simulator implements the same rule, but the
+          current ShareGPT trace carries no request-priority metadata. As a result,
+          every node receives priority <code>0</code>, so priority reduces to plain lru in this benchmark.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" id="offline-oracle">
+      <h2>Tree-Constrained Offline Oracle</h2>
+      <div class="section-grid">
+        <div>
+          <p>
+            The offline comparator remains named <code>tc_belady</code>, but under
+            the current design it is the offline optimum for the simplified fixed-block
+            model, not for unconstrained token caching in the abstract.
+          </p>
+          <p>
+            The critical restriction is that online and offline policies share the
+            same object model: one node per block, one leaf-block eviction unit, and
+            the same candidate pool at each eviction event. The oracle evicts the leaf
+            block whose block-aligned prefix is reused farthest in the future.
+          </p>
+          <div class="equation">victim = argmax_leaf next_access(prefix)</div>
+          <p>
+            This fixed-block design is what made the oracle clean. Earlier
+            compressed-leaf designs muddied the eviction unit because a single leaf
+            could represent multiple tokens with different future reuse structure.
+          </p>
+        </div>
+        <div class="svg-wrap">
+          <svg viewBox="0 0 720 350" role="img" aria-label="Offline oracle leaf selection diagram">
+            <rect x="0" y="0" width="720" height="350" rx="20" fill="#fffaf0"/>
+            <text x="26" y="38" font-size="20" fill="#1d1b18">At overflow, choose among current leaf blocks only</text>
+
+            <circle cx="170" cy="88" r="22" fill="#fff" stroke="#1d1b18"/>
+            <text x="164" y="93" font-size="15">R</text>
+            <circle cx="250" cy="138" r="22" fill="#dcecf7" stroke="#1f5f8b"/>
+            <text x="237" y="143" font-size="15">p1</text>
+            <circle cx="330" cy="198" r="22" fill="#dcecf7" stroke="#1f5f8b"/>
+            <text x="317" y="203" font-size="15">p2</text>
+            <circle cx="250" cy="258" r="22" fill="#f5d9c8" stroke="#9b3d21"/>
+            <text x="237" y="263" font-size="15">q1</text>
+            <circle cx="330" cy="298" r="22" fill="#f3ead0" stroke="#8a6a15"/>
+            <text x="317" y="303" font-size="15">r1</text>
+            <line x1="187" y1="100" x2="232" y2="126" stroke="#1d1b18" stroke-width="2.4"/>
+            <line x1="265" y1="152" x2="313" y2="184" stroke="#1d1b18" stroke-width="2.4"/>
+            <line x1="187" y1="100" x2="232" y2="246" stroke="#1d1b18" stroke-width="2.4"/>
+            <line x1="265" y1="270" x2="313" y2="286" stroke="#1d1b18" stroke-width="2.4"/>
+
+            <rect x="430" y="62" width="240" height="62" rx="14" fill="#dcecf7" stroke="#1f5f8b"/>
+            <text x="448" y="89" font-size="15" fill="#1d1b18">Leaf p2: next access in 9 steps</text>
+            <rect x="430" y="144" width="240" height="62" rx="14" fill="#f5d9c8" stroke="#9b3d21"/>
+            <text x="448" y="171" font-size="15" fill="#1d1b18">Leaf q1: next access in inf steps</text>
+            <rect x="430" y="226" width="240" height="62" rx="14" fill="#f3ead0" stroke="#8a6a15"/>
+            <text x="448" y="253" font-size="15" fill="#1d1b18">Leaf r1: next access in 2 steps</text>
+            <text x="448" y="313" font-size="16" fill="#9b3d21">Oracle evicts q1 because inf is farthest.</text>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="mechanism-analysis">
+      <h2>Shadow-Oracle Mechanism Analysis</h2>
+      <div class="section-grid">
+        <div>
+          <p>
+            The mechanism analysis does not run two independent simulations and
+            compare their final trees. That would confound the result with divergent
+            state trajectories. Instead, it uses a shadow-oracle design.
+          </p>
+          <p>
+            One online strategy drives the real simulation. At each eviction event,
+            the code inspects the exact same current leaf set and asks what
+            <code>tc_belady</code> would have evicted from that candidate pool.
+          </p>
+          <div class="equation">|A| == |B| == number of disagreement events</div>
+          <p>
+            This invariant holds because each disagreement contributes exactly one
+            online-only victim and one oracle-only victim.
+          </p>
+          <div class="legend">
+            <div class="legend-item"><span class="swatch" style="background:#d96a4c;"></span><span><strong>A</strong>: online strategy evicts, oracle retains</span></div>
+            <div class="legend-item"><span class="swatch" style="background:#4c86d9;"></span><span><strong>B</strong>: oracle evicts, online strategy retains</span></div>
+            <div class="legend-item"><span class="swatch" style="background:#b9b2a5;"></span><span><strong>C</strong>: both evict the same leaf</span></div>
+            <div class="legend-item"><span class="swatch" style="background:#d9d2c4;"></span><span><strong>D</strong>: both retain the leaf</span></div>
+          </div>
+        </div>
+        <div class="svg-wrap">
+          <svg viewBox="0 0 720 400" role="img" aria-label="Shadow oracle group diagram">
+            <rect x="0" y="0" width="720" height="400" rx="20" fill="#fffaf0"/>
+            <text x="26" y="38" font-size="20" fill="#1d1b18">Group labels at one shared eviction event</text>
+
+            <rect x="48" y="72" width="278" height="132" rx="18" fill="#f5d9c8" stroke="#9b3d21"/>
+            <text x="68" y="104" font-size="22" fill="#9b3d21">A</text>
+            <text x="102" y="103" font-size="16" fill="#1d1b18">online evicts</text>
+            <text x="102" y="126" font-size="16" fill="#1d1b18">oracle retains</text>
+            <text x="68" y="160" font-size="14" fill="#645e55">Typical interpretation:</text>
+            <text x="68" y="182" font-size="14" fill="#645e55">useful block thrown away too early</text>
+
+            <rect x="394" y="72" width="278" height="132" rx="18" fill="#dcecf7" stroke="#1f5f8b"/>
+            <text x="414" y="104" font-size="22" fill="#1f5f8b">B</text>
+            <text x="448" y="103" font-size="16" fill="#1d1b18">oracle evicts</text>
+            <text x="448" y="126" font-size="16" fill="#1d1b18">online retains</text>
+            <text x="414" y="160" font-size="14" fill="#645e55">Typical interpretation:</text>
+            <text x="414" y="182" font-size="14" fill="#645e55">dead block survives because it looks warm</text>
+
+            <rect x="48" y="236" width="278" height="116" rx="18" fill="#ece6da" stroke="#8a6a15"/>
+            <text x="68" y="268" font-size="22" fill="#8a6a15">C</text>
+            <text x="102" y="267" font-size="16" fill="#1d1b18">both evict same leaf</text>
+            <text x="68" y="307" font-size="14" fill="#645e55">agreement on the victim</text>
+
+            <rect x="394" y="236" width="278" height="116" rx="18" fill="#f4efe5" stroke="#645e55"/>
+            <text x="414" y="268" font-size="22" fill="#645e55">D</text>
+            <text x="448" y="267" font-size="16" fill="#1d1b18">both retain same leaf</text>
+            <text x="414" y="307" font-size="14" fill="#645e55">agreement on keeping the block</text>
+          </svg>
+        </div>
+      </div>
+      <div class="callout" style="margin-top:16px;">
+        <h3>Observed LRU Failure Mode</h3>
+        <p>
+          At the LRU peak-gap point, many Group B leaves are both very recent and
+          never reused again. In the current report summary, Group B for LRU has
+          median <code>time_since_last_access = 0</code>,
+          <code>time_to_next_access = inf</code>, and
+          <code>tree_depth = 1077</code>. That is the signature of false warmth:
+          deep conversation-tail blocks that were just touched but are already dead.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" id="heuristic-motivation">
+      <h2>Why DepthLRU Exists</h2>
+      <div class="section-grid">
+        <div>
+          <p>
+            Plain LRU knows only recency. It does not distinguish between a recently
+            touched broadly shared prefix and a recently touched deep tail block near
+            the end of a conversation. In this workload, that distinction matters.
+          </p>
+          <p>
+            A deep block can look extremely warm because it was touched by the latest
+            human turn, yet still be dead immediately afterward. Meanwhile, a
+            shallower prefix can look slightly older while remaining reusable across
+            later accesses.
+          </p>
+          <div class="equation">last_access_index - alpha * depth</div>
+          <p>
+            The heuristic does not try to predict the future directly. It only
+            penalizes depth so that recently touched deep leaves compete against
+            slightly older shallower leaves instead of automatically surviving every
+            time.
+          </p>
+          <div class="callout green">
+            <h3>Interpretation</h3>
+            <p>
+              <code>depth_lru</code> is a structural correction to recency, not a
+              new semantic signal. It is motivated by the observation that the
+              missing information in LRU is partly about where a leaf sits in the
+              evolving prompt tree.
+            </p>
+          </div>
+        </div>
+        <div class="svg-wrap">
+          <svg viewBox="0 0 720 420" role="img" aria-label="DepthLRU motivation diagram">
+            <rect x="0" y="0" width="720" height="420" rx="20" fill="#fffaf0"/>
+            <text x="26" y="38" font-size="20" fill="#1d1b18">False warmth: deep recent leaf vs shallower reusable prefix</text>
+
+            <rect x="34" y="78" width="298" height="304" rx="18" fill="#f5d9c8" stroke="#9b3d21"/>
+            <text x="54" y="110" font-size="18" fill="#9b3d21">Deep tail block</text>
+            <text x="54" y="140" font-size="15" fill="#1d1b18">last_access_index: very recent</text>
+            <text x="54" y="166" font-size="15" fill="#1d1b18">depth: very large</text>
+            <text x="54" y="192" font-size="15" fill="#1d1b18">future reuse: none</text>
+            <line x1="96" y1="232" x2="250" y2="232" stroke="#9b3d21" stroke-width="3"/>
+            <circle cx="126" cy="232" r="14" fill="#fff" stroke="#9b3d21"/>
+            <circle cx="166" cy="232" r="14" fill="#fff" stroke="#9b3d21"/>
+            <circle cx="206" cy="232" r="14" fill="#fff" stroke="#9b3d21"/>
+            <circle cx="246" cy="232" r="14" fill="#9b3d21" stroke="#9b3d21"/>
+            <text x="54" y="278" font-size="14" fill="#645e55">LRU sees recency and protects it.</text>
+            <text x="54" y="302" font-size="14" fill="#645e55">DepthLRU subtracts a depth penalty.</text>
+
+            <rect x="388" y="78" width="298" height="304" rx="18" fill="#dcecf7" stroke="#1f5f8b"/>
+            <text x="408" y="110" font-size="18" fill="#1f5f8b">Shared shallower prefix</text>
+            <text x="408" y="140" font-size="15" fill="#1d1b18">last_access_index: slightly older</text>
+            <text x="408" y="166" font-size="15" fill="#1d1b18">depth: moderate</text>
+            <text x="408" y="192" font-size="15" fill="#1d1b18">future reuse: likely</text>
+            <line x1="450" y1="232" x2="604" y2="232" stroke="#1f5f8b" stroke-width="3"/>
+            <circle cx="480" cy="232" r="14" fill="#fff" stroke="#1f5f8b"/>
+            <circle cx="520" cy="232" r="14" fill="#fff" stroke="#1f5f8b"/>
+            <circle cx="560" cy="232" r="14" fill="#1f5f8b" stroke="#1f5f8b"/>
+            <circle cx="600" cy="232" r="14" fill="#fff" stroke="#1f5f8b"/>
+            <text x="408" y="278" font-size="14" fill="#645e55">LRU may evict it for looking older.</text>
+            <text x="408" y="302" font-size="14" fill="#645e55">DepthLRU makes it more competitive.</text>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="results">
+      <h2>Current Benchmark Results</h2>
+      <div class="section-grid">
+        <div>
+          <p>
+            The current recorded benchmark uses the fixed-block model with
+            <code>page_size = 1</code>, the alternate Llama tokenizer, interleaved
+            ordering, and six log-spaced block budgets:
+            <code>319 1271 5061 20160 80302 319862</code>.
+          </p>
+          <table class="benchmark-table">
+            <thead>
+              <tr>
+                <th>strategy</th>
+                <th>319</th>
+                <th>1271</th>
+                <th>5061</th>
+                <th>20160</th>
+                <th>80302</th>
+                <th>319862</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>tc_belady</code></td><td>0.0300</td><td>0.0969</td><td>0.2240</td><td>0.4339</td><td>0.6056</td><td>0.6056</td></tr>
+              <tr><td><code>lru</code></td><td>0.0072</td><td>0.0192</td><td>0.0627</td><td>0.1850</td><td>0.4543</td><td>0.6056</td></tr>
+              <tr><td><code>lfu</code></td><td>0.0049</td><td>0.0087</td><td>0.0175</td><td>0.0708</td><td>0.2604</td><td>0.6056</td></tr>
+              <tr><td><code>fifo</code></td><td>0.0072</td><td>0.0192</td><td>0.0627</td><td>0.1850</td><td>0.4543</td><td>0.6056</td></tr>
+              <tr><td><code>slru</code></td><td>0.0049</td><td>0.0087</td><td>0.0175</td><td>0.0708</td><td>0.2604</td><td>0.6056</td></tr>
+              <tr><td><code>priority</code></td><td>0.0072</td><td>0.0192</td><td>0.0627</td><td>0.1850</td><td>0.4543</td><td>0.6056</td></tr>
+              <tr><td><code>depth_lru</code></td><td>0.0075</td><td>0.0201</td><td>0.0641</td><td>0.1860</td><td>0.4565</td><td>0.6056</td></tr>
+              <tr><td><code>random</code></td><td>0.0065</td><td>0.0175</td><td>0.0533</td><td>0.1472</td><td>0.3680</td><td>0.6056</td></tr>
+              <tr><td><code>mru</code></td><td>0.0024</td><td>0.0056</td><td>0.0118</td><td>0.0393</td><td>0.1476</td><td>0.6056</td></tr>
+              <tr><td><code>filo</code></td><td>0.0024</td><td>0.0056</td><td>0.0118</td><td>0.0393</td><td>0.1476</td><td>0.6056</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <div class="callout">
+            <h3>Gap Summary</h3>
+            <table>
+              <thead>
+                <tr><th>baseline</th><th class="numeric">peak gap</th><th class="numeric">cache size</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><code>lru</code></td><td class="numeric">80.2%</td><td class="numeric">1271</td></tr>
+                <tr><td><code>depth_lru</code></td><td class="numeric">79.3%</td><td class="numeric">1271</td></tr>
+                <tr><td><code>random</code></td><td class="numeric">82.0%</td><td class="numeric">1271</td></tr>
+                <tr><td><code>lfu</code></td><td class="numeric">92.2%</td><td class="numeric">5061</td></tr>
+                <tr><td><code>mru</code></td><td class="numeric">94.7%</td><td class="numeric">5061</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="callout blue" style="margin-top:16px;">
+            <h3>Main Read</h3>
+            <p>
+              The heuristic helps, but only slightly. <code>depth_lru</code> improves
+              over <code>lru</code> at every non-full cache size, yet the peak gap
+              only moves from <strong>80.2%</strong> to <strong>79.3%</strong>. That
+              means depth captures part of the failure mode, but not enough to close
+              the gap materially.
+            </p>
+          </div>
+          <div class="mini-panel" style="margin-top:16px;">
+            <strong>Runtime.</strong>
+            The six-size benchmark sweep recorded
+            <code>353.70s real</code>, <code>331.60s user</code>, and
+            <code>13.15s sys</code>.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="fidelity">
+      <h2>Alignment With SGLang and Intentional Simplifications</h2>
+      <div class="section-grid">
+        <div>
+          <div class="callout green">
+            <h3>Aligned Pieces</h3>
+            <ul>
+              <li>page-aligned block semantics</li>
+              <li>radix-tree prefix matching at block boundaries</li>
+              <li>leaf-based candidate pool for eviction</li>
+              <li>priority-aware eviction rule shape</li>
+              <li>per-node recency/frequency style metadata for online policies</li>
+            </ul>
+          </div>
+        </div>
+        <div>
+          <div class="callout">
+            <h3>Explicit Simplifications</h3>
+            <ul>
+              <li>fixed-size block model rather than full allocator behavior</li>
+              <li>no lock-state modeling</li>
+              <li>no extra-key namespaces</li>
+              <li>no Eagle/bigram mode</li>
+              <li>report benchmark uses <code>page_size = 1</code></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <p class="footer-note" style="margin-top:18px;">
+        This makes the page a precise explanation of the current repository state,
+        not a claim that every production SGLang detail has been simulated.
+      </p>
+    </section>
+  </div>
+</body>
+</html>
