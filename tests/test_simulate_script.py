@@ -38,6 +38,10 @@ def test_simulate_script_writes_results_pickle(tmp_path: Path):
     assert "[simulate] result lru cache_size=2" in completed.stderr
     assert "token_hit_rate=" in completed.stderr
     assert "[simulate] wrote" in completed.stderr
+    assert (tmp_path / "results.csv").exists()
+    assert (tmp_path / "results.md").exists()
+    assert "strategy,cache_size,token_hit_rate,request_hit_rate" in (tmp_path / "results.csv").read_text()
+    assert "| strategy | cache_size | token_hit_rate | request_hit_rate |" in (tmp_path / "results.md").read_text()
     with output_path.open("rb") as handle:
         results = pickle.load(handle)
 

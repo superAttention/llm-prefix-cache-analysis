@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 from pathlib import Path
 import pickle
 import sys
@@ -97,8 +98,18 @@ def main() -> None:
         print(f"[mechanism] writing {output_path}", file=sys.stderr, flush=True)
     with output_path.open("wb") as handle:
         pickle.dump(mechanism, handle)
+    csv_path, markdown_path = _write_readable_summary(
+        mechanism=mechanism,
+        output_path=output_path,
+        cache_size=cache_size,
+        baseline_name=args.baseline,
+        results=results,
+        selected_by_gap=args.cache_size is None,
+    )
     if not args.quiet:
         print(f"[mechanism] wrote {output_path}", file=sys.stderr, flush=True)
+        print(f"[mechanism] wrote {csv_path}", file=sys.stderr, flush=True)
+        print(f"[mechanism] wrote {markdown_path}", file=sys.stderr, flush=True)
 
 
 def _load_pickle(path: Path):
@@ -151,6 +162,72 @@ def _print_strategy_summary(strategy_name: str, frame) -> None:
         file=sys.stderr,
         flush=True,
     )
+
+
+def _write_readable_summary(
+    mechanism,
+    output_path: Path,
+    cache_size: int,
+    baseline_name: str,
+    results: dict[str, list[dict[str, float | int]]],
+    selected_by_gap: bool,
+) -> tuple[Path, Path]:
+    csv_path = output_path.with_name(f"{output_path.stem}-summary.csv")
+    markdown_path = output_path.with_name(f"{output_path.stem}-summary.md")
+    rows = [_strategy_summary_row(strategy_name, cache_size, frame) for strategy_name, frame in mechanism.items()]
+
+    fieldnames = [
+        "strategy",
+        "cache_size",
+        "rows",
+        "group_A",
+        "group_B",
+        "group_C",
+        "group_D",
+    ]
+    with csv_path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    belady = _point_for_cache_size(results["tc_belady"], cache_size)
+    baseline = _point_for_cache_size(results[baseline_name], cache_size)
+    gap = relative_gap(
+        optimal_hit_rate=float(belady["token_hit_rate"]),
+        baseline_hit_rate=float(baseline["token_hit_rate"]),
+    )
+
+    with markdown_path.open("w") as handle:
+        handle.write("# Mechanism Summary\n\n")
+        selector = "peak gap" if selected_by_gap else "explicit cache size"
+        handle.write(f"- Selector: {selector}\n")
+        handle.write(f"- Baseline: `{baseline_name}`\n")
+        handle.write(f"- Cache size: `{cache_size}`\n")
+        handle.write(f"- `tc_belady` token hit rate: `{float(belady['token_hit_rate']):.6f}`\n")
+        handle.write(f"- `{baseline_name}` token hit rate: `{float(baseline['token_hit_rate']):.6f}`\n")
+        handle.write(f"- Relative gap: `{gap:.6f}`\n\n")
+        handle.write("| strategy | cache_size | rows | group_A | group_B | group_C | group_D |\n")
+        handle.write("| --- | ---: | ---: | ---: | ---: | ---: | ---: |\n")
+        for row in rows:
+            handle.write(
+                f"| {row['strategy']} | {row['cache_size']} | {row['rows']} | "
+                f"{row['group_A']} | {row['group_B']} | {row['group_C']} | {row['group_D']} |\n"
+            )
+
+    return csv_path, markdown_path
+
+
+def _strategy_summary_row(strategy_name: str, cache_size: int, frame) -> dict[str, int | str]:
+    group_counts = frame["group"].value_counts().to_dict() if "group" in frame else {}
+    return {
+        "strategy": strategy_name,
+        "cache_size": cache_size,
+        "rows": len(frame),
+        "group_A": int(group_counts.get("A", 0)),
+        "group_B": int(group_counts.get("B", 0)),
+        "group_C": int(group_counts.get("C", 0)),
+        "group_D": int(group_counts.get("D", 0)),
+    }
 
 
 if __name__ == "__main__":

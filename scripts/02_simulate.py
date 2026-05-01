@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 from pathlib import Path
 import pickle
 import sys
@@ -73,8 +74,11 @@ def main() -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("wb") as handle:
         pickle.dump(results, handle)
+    csv_path, markdown_path = _write_readable_results(results, output_path)
     if not args.quiet:
         _print_results_summary(results, output_path)
+        print(f"[simulate] wrote {csv_path}", file=sys.stderr, flush=True)
+        print(f"[simulate] wrote {markdown_path}", file=sys.stderr, flush=True)
 
 
 def _print_results_summary(results: dict[str, list[dict[str, float | int]]], output_path: Path) -> None:
@@ -91,6 +95,44 @@ def _print_results_summary(results: dict[str, list[dict[str, float | int]]], out
                 flush=True,
             )
     print(f"[simulate] wrote {output_path}", file=sys.stderr, flush=True)
+
+
+def _write_readable_results(
+    results: dict[str, list[dict[str, float | int]]],
+    output_path: Path,
+) -> tuple[Path, Path]:
+    csv_path = output_path.with_suffix(".csv")
+    markdown_path = output_path.with_suffix(".md")
+    rows = [
+        {
+            "strategy": strategy_name,
+            "cache_size": int(point["cache_size"]),
+            "token_hit_rate": float(point["token_hit_rate"]),
+            "request_hit_rate": float(point["request_hit_rate"]),
+        }
+        for strategy_name, points in results.items()
+        for point in points
+    ]
+
+    with csv_path.open("w", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=["strategy", "cache_size", "token_hit_rate", "request_hit_rate"],
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+
+    with markdown_path.open("w") as handle:
+        handle.write("# Simulation Results\n\n")
+        handle.write("| strategy | cache_size | token_hit_rate | request_hit_rate |\n")
+        handle.write("| --- | ---: | ---: | ---: |\n")
+        for row in rows:
+            handle.write(
+                f"| {row['strategy']} | {row['cache_size']} | "
+                f"{row['token_hit_rate']:.6f} | {row['request_hit_rate']:.6f} |\n"
+            )
+
+    return csv_path, markdown_path
 
 
 if __name__ == "__main__":

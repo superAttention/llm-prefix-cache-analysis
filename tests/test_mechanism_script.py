@@ -50,6 +50,14 @@ def test_mechanism_script_writes_pickle(tmp_path: Path):
     assert "[mechanism] result lru rows=" in completed.stderr
     assert "groups=" in completed.stderr
     assert "[mechanism] writing" in completed.stderr
+    assert (tmp_path / "mechanism-summary.csv").exists()
+    assert (tmp_path / "mechanism-summary.md").exists()
+    assert "strategy,cache_size,rows,group_A,group_B,group_C,group_D" in (
+        tmp_path / "mechanism-summary.csv"
+    ).read_text()
+    assert "| strategy | cache_size | rows | group_A | group_B | group_C | group_D |" in (
+        tmp_path / "mechanism-summary.md"
+    ).read_text()
     with output_path.open("rb") as handle:
         payload = pickle.load(handle)
 
