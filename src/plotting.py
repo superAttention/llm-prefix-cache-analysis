@@ -17,13 +17,13 @@ def plot_gap_curve(results: dict[str, list[dict[str, float | int]]], output_path
     fig, (ax_hits, ax_gap) = plt.subplots(2, 1, figsize=(7.5, 8), sharex=True)
 
     for strategy_name, group in frame.groupby("strategy_name"):
-        linestyle = "--" if strategy_name in {"tc_belady", "naive_lru"} else ":"
-        if strategy_name not in {"tc_belady", "naive_lru", "random"}:
+        linestyle = "--" if strategy_name == "tc_belady" else ":"
+        if strategy_name not in {"tc_belady", "random"}:
             linestyle = "-"
         ax_hits.plot(group["cache_size"], group["token_hit_rate"], label=strategy_name, linestyle=linestyle)
 
     belady = frame[frame["strategy_name"] == "tc_belady"].sort_values("cache_size")
-    competitors = frame[~frame["strategy_name"].isin({"tc_belady", "naive_lru", "random"})]
+    competitors = frame[~frame["strategy_name"].isin({"tc_belady", "random"})]
     if not competitors.empty:
         best = (
             competitors.groupby("cache_size", as_index=False)["token_hit_rate"]
@@ -53,7 +53,7 @@ def plot_gap_curve(results: dict[str, list[dict[str, float | int]]], output_path
 
     ax_gap.set_xscale("log")
     ax_gap.set_ylim(0, 1)
-    ax_gap.set_xlabel("Cache Size (tokens)")
+    ax_gap.set_xlabel("Cache Size (blocks)")
     ax_gap.set_ylabel("Relative Gap")
     ax_gap.grid(alpha=0.25)
 

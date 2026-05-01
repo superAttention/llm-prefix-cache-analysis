@@ -1,53 +1,51 @@
 # Simulation Results — ShareGPT Prefix Cache Eviction Gap
 Date: 2026-04-30
 
-## Trace
-- Dataset: ShareGPT (first 100 conversations, interleaved order)
-- Accesses: 324
-- Total tokens requested: 249,664
-- Unique prefix tokens: 104,839
+## Current Model
+- Dataset: ShareGPT cached local snapshot
+- Tokenizer: `NousResearch/Meta-Llama-3-8B-Alternate-Tokenizer`
+- Conversations: `300`
+- Accesses: `978`
+- Ordering: interleaved
+- Cache model: fixed-size block radix tree
+- Page size: `1` token per block
+- Capacity accounting: blocks
+- Benefit metrics: token hit rate and request hit rate
 
-## Token Hit Rate by Strategy and Cache Size
+## Trace Stats
+- Total tokens requested: `811,050`
+- Unique block prefixes: `319,862`
 
-Strategy           104       415      1654      6594     26292    104839
+## Token Hit Rate by Strategy and Block Budget
+
+Strategy           319      1271      5061     20160     80302    319862
 ------------------------------------------------------------------------
-tc_belady       0.0138    0.0454    0.1432    0.3414    0.5751    0.5801
-lru             0.0029    0.0055    0.0158    0.1131    0.3803    0.5801
-lfu             0.0046    0.0083    0.0213    0.0670    0.2874    0.5801
-fifo            0.0029    0.0055    0.0158    0.1131    0.3803    0.5801
-slru            0.0046    0.0083    0.0213    0.0670    0.2874    0.5801
-mru             0.0030    0.0046    0.0080    0.0231    0.1635    0.5801
-filo            0.0030    0.0046    0.0080    0.0231    0.1635    0.5801
-priority        0.0029    0.0055    0.0158    0.1131    0.3803    0.5801
-random          0.0029    0.0048    0.0229    0.0950    0.2948    0.5801
-naive_lru       0.0000    0.0000    0.0000    0.0000    0.0000    0.0000
+tc_belady       0.0300    0.0969    0.2240    0.4339    0.6056    0.6056
+lru             0.0072    0.0192    0.0627    0.1850    0.4543    0.6056
+lfu             0.0049    0.0087    0.0175    0.0708    0.2604    0.6056
+fifo            0.0072    0.0192    0.0627    0.1850    0.4543    0.6056
+slru            0.0049    0.0087    0.0175    0.0708    0.2604    0.6056
+priority        0.0072    0.0192    0.0627    0.1850    0.4543    0.6056
+random          0.0065    0.0175    0.0533    0.1472    0.3680    0.6056
+mru             0.0024    0.0056    0.0118    0.0393    0.1476    0.6056
+filo            0.0024    0.0056    0.0118    0.0393    0.1476    0.6056
 
-## TC-Belady vs LRU Gap
+## `tc_belady` Gap Highlights
 
-  cache_size=    104: belady=0.0138  lru=0.0029  relative_gap=79.3%
-  cache_size=    415: belady=0.0454  lru=0.0055  relative_gap=88.0%
-  cache_size=   1654: belady=0.1432  lru=0.0158  relative_gap=89.0%
-  cache_size=   6594: belady=0.3414  lru=0.1131  relative_gap=66.9%
-  cache_size=  26292: belady=0.5751  lru=0.3803  relative_gap=33.9%
-  cache_size= 104839: belady=0.5801  lru=0.5801  relative_gap=0.0%
+- `tc_belady` dominates every online policy at every reported cache size.
+- `lru` peak relative gap: `80.2%` at `1271` blocks.
+- `random` peak relative gap: `82.0%` at `1271` blocks.
+- `lfu` and `slru` peak relative gap: `92.2%` at `5061` blocks.
+- `mru` and `filo` peak relative gap: `94.7%` at `5061` blocks.
+- Full-cache convergence occurs at `319,862` blocks.
 
-Peak gap: 89.0% at cache_size=1654
+## Runtime
+- Benchmark command used six log-spaced cache sizes:
+  `319 1271 5061 20160 80302 319862`
+- Full all-policy sweep completed and produced:
+  `cache/sharegpt-results-300-llama-alt-benchmark.pkl`
+- Observed runtime: `353.70s real`, `331.60s user`, `13.15s sys`
 
-## Mechanism Analysis (LRU vs TC-Belady, 10-conv trace at peak-gap cache size)
-Method: shadow oracle — one LRU simulation; TC-Belady consulted as oracle at each eviction event.
-|A| == |B| == number of eviction events by construction (one disagreement per eviction unless both agree → C).
-
-Total records (all leaves × all eviction events): 28,756
-  Group A — LRU evicts, Belady retains (LRU mistake):   4,466
-  Group B — Belady evicts, LRU retains (false warmth):  4,466
-  Group C — both evict (agreed):                       16,171
-  Group D — both retain (agreed):                       3,653
-
-Group A (LRU mistakes):  median time_since_last_access=1.0,  median time_to_next_access=5.0
-Group B (false warmth):  median time_since_last_access=0.0,  median time_to_next_access=inf
-Group C (agreed evict):  median time_since_last_access=0.0,  median time_to_next_access=inf
-Group D (agreed retain): median time_since_last_access=0.0,  median time_to_next_access=5.0
-
-Key finding: Group B has time_since_last_access=0 (just accessed) but time_to_next_access=inf (never again).
-LRU retains these because recency looks good; Belady evicts them because the future is dead.
-This "false warmth" is LRU's primary failure mode on this workload.
+## Notes
+- This summary intentionally replaces the earlier `100`-conversation and `distilgpt2` notes. Those numbers came from the pre-redesign compressed-leaf simulator and are no longer the current model.
+- Under `page_size=1`, the fixed-block model still uses token-aligned prefixes, but the eviction unit and cache budget are now explicit block objects rather than compressed variable-length leaf segments.
