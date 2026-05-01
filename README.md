@@ -62,6 +62,8 @@ The current human-readable results are stored in:
 - [report_site.html](./report_site.html)
 - Hosted report: https://superattention.github.io/llm-prefix-cache-analysis/report_site
 
+The reported numbers should remain the same when rerunning from the same `cache/sharegpt-trace-300-llama-alt.pkl`. Rebuilding the trace from Hugging Face can change if the upstream dataset file or tokenizer revision changes, so the trace pickle is the reproducibility boundary for the simulation and mechanism-analysis stages.
+
 ## Pipeline
 
 Install dependencies:
@@ -78,6 +80,20 @@ python scripts/01_prepare_trace.py \
   --order interleaved \
   --seed 0 \
   --dataset anon8231489123/ShareGPT_Vicuna_unfiltered \
+  --tokenizer NousResearch/Meta-Llama-3-8B-Alternate-Tokenizer \
+  --output cache/sharegpt-trace-300-llama-alt.pkl
+```
+
+`anon8231489123/ShareGPT_Vicuna_unfiltered` is not directly inferable by `datasets.load_dataset()` because the repository contains mixed file types and multiple JSON files. The trace-preparation helper falls back to the known benchmark file, `ShareGPT_V3_unfiltered_cleaned_split.json`, for this dataset ID. On a fresh machine this may download a large Hugging Face file before writing the local trace pickle.
+
+For exact reproduction, prefer reusing the generated trace pickle or pass a local copy of the JSON snapshot:
+
+```bash
+python scripts/01_prepare_trace.py \
+  --limit 300 \
+  --order interleaved \
+  --seed 0 \
+  --dataset /path/to/ShareGPT_V3_unfiltered_cleaned_split.json \
   --tokenizer NousResearch/Meta-Llama-3-8B-Alternate-Tokenizer \
   --output cache/sharegpt-trace-300-llama-alt.pkl
 ```
