@@ -57,12 +57,6 @@ Using `(tc_belady - baseline) / tc_belady` on token hit rate:
 | `mru` | 94.7% | 5061 |
 | `filo` | 94.7% | 5061 |
 
-## Conservative Read
-
-- `tc_belady` should be read as the upper bound under the same leaf-only candidate constraint, not as an unconstrained global optimum for prefix caching.
-- Peak relative gap is not the only useful summary. At the `20160`-token budget, the `lru` absolute gap is `0.2488` token-hit-rate points and the relative gap is `57.4%`.
-- `depth_lru` is now defined with `alpha = 0.01 * page_size` by design; the baseline results on this page use `page_size = 1`, so they are numerically unchanged.
-
 ## Page-Size Robustness
 
 The same trace was rerun at `page_size = 16, 32, 64` using equal token budgets and the policy set `lru / depth_lru / tc_belady`.
@@ -79,16 +73,9 @@ At a `20160`-token budget:
 | `32` | 630 | 0.4257 | 0.1745 | 0.2512 | 0.0026 |
 | `64` | 315 | 0.4206 | 0.1689 | 0.2516 | 0.0024 |
 
-Takeaway:
-- The constrained `lru`-vs-`tc_belady` gap persists at non-degenerate page sizes.
-- Scaling `alpha` with `page_size` recovers some heuristic signal at larger block sizes, but the gain remains small relative to the constrained oracle gap.
-
 ## Notes
-- `tc_belady` dominates every online policy at every reported cache size under the fixed-block model.
-- `depth_lru` is consistently but only slightly better than plain `lru`; it does not materially close the gap.
 - `priority` matches SGLang's priority-aware eviction rule, but this trace has no request-priority metadata, so every node receives priority `0` and the policy collapses to plain `lru` here.
 - `lru`, `fifo`, and `priority` are therefore numerically identical in this benchmark.
 - `lfu` and `slru` are numerically identical on this trace.
 - `mru` and `filo` are numerically identical on this trace.
 - Full-cache convergence occurs at `319,862` blocks, which matches the unique-block-prefix count for this trace.
-- `page_size = 1` is a diagnostic baseline. It isolates the leaf-only model cleanly, but it is not by itself enough to claim production-like page behavior.

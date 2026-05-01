@@ -10,6 +10,16 @@ https://superattention.github.io/llm-prefix-cache-analysis/report_site
 
 The same static report artifact is checked in at [`report_site.html`](./report_site.html). The report summarizes the current benchmark, the tree-constrained Belady oracle, mechanism analysis, and the page-size robustness check.
 
+## Figures
+
+![Token hit-rate and relative-gap curves](./paper/figures/gap_curve.png)
+
+PDF: [`gap_curve.pdf`](./paper/figures/gap_curve.pdf)
+
+![Mechanism scatter plot](./paper/figures/mechanism_scatter.png)
+
+PDF: [`mechanism_scatter.pdf`](./paper/figures/mechanism_scatter.pdf)
+
 ## Current status
 
 The repository contains the fixed-block analysis pipeline described in [plan.md](./plan.md):
@@ -30,11 +40,12 @@ The repository contains the fixed-block analysis pipeline described in [plan.md]
 - Ordering: interleaved, random with seed `0`
 - Cache model: fixed-size block radix tree, with capacity measured in blocks
 - Default reported page size: `1` token per block
-- Reported benchmark summary: [results_summary.md](./results_summary.md)
-- Detailed benchmark note: [benchmark_results_llama_alt.md](./benchmark_results_llama_alt.md)
+- Benchmark note: [benchmark_results_llama_alt.md](./benchmark_results_llama_alt.md)
+- Generated readable results: `cache/sharegpt-results-300-llama-alt-benchmark.csv` and `cache/sharegpt-results-300-llama-alt-benchmark.md`
+- Generated mechanism summary: `cache/sharegpt-mechanism-300-llama-alt-summary.csv` and `cache/sharegpt-mechanism-300-llama-alt-summary.md`
 - Static report artifact: [report_site.html](./report_site.html)
 
-Headline result: `tc_belady` dominates the online policies at every reported cache size. For `lru`, the peak relative gap to `tc_belady` is `80.2%` at `1271` blocks. At the `20160`-token budget, the absolute `lru` gap is `0.2488` token-hit-rate points.
+Reported `lru` peak relative gap to `tc_belady`: `80.2%` at `1271` blocks. At the `20160`-token budget, the absolute `lru` gap is `0.2488` token-hit-rate points.
 
 ## Repository layout
 
@@ -43,7 +54,7 @@ Headline result: `tc_belady` dominates the online policies at every reported cac
 - [`tests/`](./tests) contains unit tests for trace construction, simulation, paging, mechanism analysis, plotting, and report-site content.
 - `cache/` is the default local output directory for generated traces, simulation results, and mechanism-analysis pickles. It is intentionally not required to exist before running the pipeline.
 - `paper/figures/` is the default output directory for generated plots from `scripts/04_plot.py`.
-- [`results_summary.md`](./results_summary.md) and [`benchmark_results_llama_alt.md`](./benchmark_results_llama_alt.md) contain the current reported benchmark notes.
+- [`benchmark_results_llama_alt.md`](./benchmark_results_llama_alt.md) contains the current factual benchmark note.
 - [`report_site.html`](./report_site.html) is the generated standalone report page.
 
 ## Result artifacts
@@ -54,10 +65,11 @@ Generated binary artifacts are written wherever the script `--output` argument p
 - Main benchmark results: `cache/sharegpt-results-300-llama-alt-benchmark.pkl`
 - Mechanism analysis: `cache/sharegpt-mechanism-300-llama-alt.pkl`
 - Generated figures: `paper/figures/gap_curve.pdf` and `paper/figures/mechanism_scatter.pdf`
+- Simulation sidecars: `cache/sharegpt-results-300-llama-alt-benchmark.csv` and `cache/sharegpt-results-300-llama-alt-benchmark.md`
+- Mechanism sidecars: `cache/sharegpt-mechanism-300-llama-alt-summary.csv` and `cache/sharegpt-mechanism-300-llama-alt-summary.md`
 
 The current human-readable results are stored in:
 
-- [results_summary.md](./results_summary.md)
 - [benchmark_results_llama_alt.md](./benchmark_results_llama_alt.md)
 - [report_site.html](./report_site.html)
 - Hosted report: https://superattention.github.io/llm-prefix-cache-analysis/report_site
