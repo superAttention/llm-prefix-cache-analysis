@@ -61,6 +61,7 @@ Using `(tc_belady - baseline) / tc_belady` on token hit rate:
 
 - `tc_belady` should be read as the upper bound under the same leaf-only candidate constraint, not as an unconstrained global optimum for prefix caching.
 - Peak relative gap is not the only useful summary. At the `20160`-token budget, the `lru` absolute gap is `0.2488` token-hit-rate points and the relative gap is `57.4%`.
+- `depth_lru` is now defined with `alpha = 0.01 * page_size` by design; the baseline results on this page use `page_size = 1`, so they are numerically unchanged.
 
 ## Page-Size Robustness
 
@@ -80,7 +81,7 @@ At a `20160`-token budget:
 
 Takeaway:
 - The constrained `lru`-vs-`tc_belady` gap persists at non-degenerate page sizes.
-- The current `depth_lru` heuristic does not: with coarser page sizes, it becomes effectively identical to `lru`.
+- A fixed-`alpha` DepthLRU does not: with coarser page sizes, it becomes effectively identical to `lru`, which is why the implementation now scales `alpha` with `page_size` by design.
 
 ## Notes
 - `tc_belady` dominates every online policy at every reported cache size under the fixed-block model.

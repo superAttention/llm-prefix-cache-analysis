@@ -796,7 +796,7 @@
             later accesses.
           </p>
           <div class="equation">last_access_index - alpha * depth</div>
-          <p><strong>Current setting:</strong> <code>alpha = 0.01</code>.</p>
+          <p><strong>Current design:</strong> <code>alpha = 0.01 * page_size</code>. The reported <code>page_size = 1</code> benchmark therefore uses <code>alpha = 0.01</code>.</p>
           <p>
             The heuristic does not try to predict the future directly. It only
             penalizes depth so that recently touched deep leaves compete against
@@ -808,8 +808,9 @@
             <p>
               <code>depth_lru</code> is a structural correction to recency, not a
               new semantic signal. Under this trace construction it may also be acting
-              as a proxy for "chat tail position," which is why robustness beyond
-              <code>page_size = 1</code> matters.
+              as a proxy for "chat tail position," which is why the implementation
+              scales the depth penalty with <code>page_size</code> and why robustness
+              beyond <code>page_size = 1</code> still matters.
             </p>
           </div>
         </div>
@@ -928,10 +929,10 @@
           <code>lru / depth_lru / tc_belady</code>.
         </p>
         <p>
-          Result: the constrained LRU-vs-oracle gap remains large, but the heuristic
-          mostly disappears once depth is measured in coarser block units. In other
-          words, the gap is robust, but the current <code>depth_lru</code> parameterization
-          is not.
+          Result: the constrained LRU-vs-oracle gap remains large. A fixed-<code>alpha</code>
+          DepthLRU mostly disappears once depth is measured in coarser block units,
+          which is why the implementation now scales <code>alpha</code> with
+          <code>page_size</code> by design.
         </p>
         <table>
           <thead>

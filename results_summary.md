@@ -74,7 +74,8 @@ Interpretation:
 
 ## Heuristic Check (`depth_lru`)
 
-- Current parameter: `alpha = 0.01`
+- Current design: `alpha = 0.01 * page_size`
+- Reported `page_size = 1` benchmark therefore uses `alpha = 0.01`
 - `depth_lru` is slightly better than `lru` at every non-full cache size, but the improvement is small.
 - Peak relative gap only moves from `80.2%` to `79.3%`.
 
@@ -113,7 +114,7 @@ At a `20160`-token budget:
 
 Takeaway:
 - The constrained `lru`-vs-`tc_belady` gap is robust across non-degenerate page sizes.
-- The current `depth_lru` parameterization is not robust: once depth is measured in coarser block units, the heuristic becomes effectively indistinguishable from `lru`.
+- A fixed-`alpha` DepthLRU was not robust, which is why the implementation now scales `alpha` with `page_size` by design.
 
 ## Runtime
 - Benchmark command used six log-spaced cache sizes:

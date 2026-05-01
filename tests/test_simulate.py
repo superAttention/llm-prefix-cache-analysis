@@ -1,3 +1,4 @@
+from src.eviction import DepthLRU
 from src.simulate import build_strategy_registry, run_suite
 
 
@@ -17,6 +18,15 @@ def test_strategy_registry_exposes_expected_baselines():
 
     assert {"lru", "lfu", "fifo", "mru", "filo", "slru", "priority", "random", "tc_belady"} <= set(registry)
     assert "naive_lru" not in registry
+
+
+def test_depth_lru_scales_alpha_with_page_size():
+    registry = build_strategy_registry(page_size=32)
+
+    simulator = registry["depth_lru"](budget=10)
+
+    assert isinstance(simulator.eviction_strategy, DepthLRU)
+    assert simulator.eviction_strategy.alpha == 0.32
 
 
 def test_run_suite_derives_cache_sizes_from_unique_blocks():

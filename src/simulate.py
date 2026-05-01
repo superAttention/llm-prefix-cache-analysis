@@ -29,6 +29,7 @@ StrategyFactory = Callable[[int], object]
 
 
 def build_strategy_registry(seed: int = 0, page_size: int = 1) -> dict[str, StrategyFactory]:
+    depth_alpha = 0.01 * page_size
     return {
         "lru": lambda budget: RadixTree(block_budget=budget, eviction_strategy=LRU(), page_size=page_size),
         "lfu": lambda budget: RadixTree(block_budget=budget, eviction_strategy=LFU(), page_size=page_size),
@@ -44,7 +45,7 @@ def build_strategy_registry(seed: int = 0, page_size: int = 1) -> dict[str, Stra
         ),
         "depth_lru": lambda budget: RadixTree(
             block_budget=budget,
-            eviction_strategy=DepthLRU(),
+            eviction_strategy=DepthLRU(alpha=depth_alpha),
             page_size=page_size,
         ),
         "tc_belady": lambda budget: TreeConstrainedBelady(block_budget=budget, page_size=page_size),
