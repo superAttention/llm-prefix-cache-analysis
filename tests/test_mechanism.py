@@ -39,15 +39,19 @@ def test_analyze_against_belady_labels_shared_candidates_by_group():
 def test_analyze_against_belady_reports_progress():
     trace = [[1], [2], [3], [1], [2]]
     events = []
+    stages = []
 
     analyze_against_belady(
         trace,
         cache_size=2,
         strategy_name="lru",
         progress_callback=lambda completed, total, records: events.append((completed, total, records)),
+        status_callback=stages.append,
         progress_interval_seconds=0,
     )
 
     assert events
     assert events[-1][0:2] == (5, 5)
     assert events[-1][2] > 0
+    assert any("building DataFrame" in stage for stage in stages)
+    assert any("built DataFrame" in stage for stage in stages)

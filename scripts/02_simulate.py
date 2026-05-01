@@ -73,6 +73,24 @@ def main() -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("wb") as handle:
         pickle.dump(results, handle)
+    if not args.quiet:
+        _print_results_summary(results, output_path)
+
+
+def _print_results_summary(results: dict[str, list[dict[str, float | int]]], output_path: Path) -> None:
+    print("[simulate] results summary", file=sys.stderr, flush=True)
+    for strategy_name, points in results.items():
+        for point in points:
+            print(
+                "[simulate] result "
+                f"{strategy_name} "
+                f"cache_size={int(point['cache_size'])} "
+                f"token_hit_rate={float(point['token_hit_rate']):.4f} "
+                f"request_hit_rate={float(point['request_hit_rate']):.4f}",
+                file=sys.stderr,
+                flush=True,
+            )
+    print(f"[simulate] wrote {output_path}", file=sys.stderr, flush=True)
 
 
 if __name__ == "__main__":

@@ -44,6 +44,7 @@ def analyze_against_belady(
     seed: int = 0,
     page_size: int = 1,
     progress_callback: Callable[[int, int, int], None] | None = None,
+    status_callback: Callable[[str], None] | None = None,
     progress_interval_seconds: float = 5.0,
 ) -> pd.DataFrame:
     """Shadow-oracle approach: run one strategy simulation; at each eviction
@@ -118,7 +119,12 @@ def analyze_against_belady(
 
         maybe_report_progress(access_index + 1, force=access_index + 1 == total_accesses)
 
-    return pd.DataFrame.from_records(records)
+    if status_callback is not None:
+        status_callback(f"building DataFrame from {len(records)} records")
+    frame = pd.DataFrame.from_records(records)
+    if status_callback is not None:
+        status_callback(f"built DataFrame with {len(frame)} rows")
+    return frame
 
 
 def _label_group(strategy_evicted: bool, belady_evicted: bool) -> str:

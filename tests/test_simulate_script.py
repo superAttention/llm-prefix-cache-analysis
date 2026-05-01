@@ -35,6 +35,9 @@ def test_simulate_script_writes_results_pickle(tmp_path: Path):
     )
 
     assert completed.returncode == 0, completed.stderr
+    assert "[simulate] result lru cache_size=2" in completed.stderr
+    assert "token_hit_rate=" in completed.stderr
+    assert "[simulate] wrote" in completed.stderr
     with output_path.open("rb") as handle:
         results = pickle.load(handle)
 

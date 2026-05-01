@@ -56,5 +56,12 @@ def test_plot_script_writes_both_figures(tmp_path: Path):
     )
 
     assert completed.returncode == 0, completed.stderr
+    assert "[plot] importing plotting stack" in completed.stderr
+    assert "[plot] loading results" in completed.stderr
+    assert "[plot] loaded results" in completed.stderr
+    assert "[plot] loading mechanism" in completed.stderr
+    assert "[plot] loaded mechanism" in completed.stderr
+    assert "[plot] writing gap curve" in completed.stderr
+    assert "[plot] wrote mechanism scatter" in completed.stderr
     assert (figures_dir / "gap_curve.pdf").exists()
     assert (figures_dir / "mechanism_scatter.pdf").exists()
