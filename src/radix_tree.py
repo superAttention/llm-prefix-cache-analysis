@@ -13,11 +13,11 @@ class AccessResult:
         return self.inserted_tokens == 0
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, eq=False)
 class TreeNode:
-    token: int | None
+    key: tuple[int, ...]
+    prefix: tuple[int, ...]
     parent: "TreeNode | None" = None
-    prefix: tuple[int, ...] = ()
     created_at: int = -1
     last_access_index: int = -1
     access_count: int = 0
@@ -34,29 +34,23 @@ class TreeNode:
 
     @property
     def token_length(self) -> int:
-        return 0 if self.is_root else 1
+        return len(self.key)
+
+    @property
+    def token(self) -> int | None:
+        return None if not self.key else self.key[0]
 
 
 class RadixTree:
     def __init__(self, token_budget: int, eviction_strategy) -> None:
         self.token_budget = token_budget
         self.eviction_strategy = eviction_strategy
-        self.root = TreeNode(token=None)
+        self.root = TreeNode(key=(), prefix=())
         self.cached_token_count = 0
+        self.evictable_leaves: set[TreeNode] = set()
 
     def lookup(self, tokens: list[int], access_index: int | None = None) -> AccessResult:
-        node = self.root
-        hit_tokens = 0
-
-        for token in tokens:
-            child = node.children.get(token)
-            if child is None:
-                break
-            node = child
-            hit_tokens += 1
-            if access_index is not None:
-                self._touch_node(node, access_index)
-
+        hit_tokens, _node = self._match_prefix(tokens, access_index=access_index)
         return AccessResult(hit_tokens=hit_tokens, inserted_tokens=len(tokens) - hit_tokens)
 
     def access(
@@ -82,48 +76,31 @@ class RadixTree:
         access_index: int,
         priority: int | float = 0,
     ) -> int:
-        node = self.root
-        for token in tokens[:start_index]:
-            node = node.children[token]
+        terminal_node, path = self._locate_exact_node(tokens[:start_index])
+        for node in path:
+            node.priority = max(node.priority, priority)
 
-        inserted_tokens = 0
-        for token in tokens[start_index:]:
-            child = node.children.get(token)
-            if child is None:
-                child = TreeNode(
-                    token=token,
-                    parent=node,
-                    prefix=node.prefix + (token,),
-                    created_at=access_index,
-                    last_access_index=access_index,
-                    access_count=1,
-                    priority=priority,
-                )
-                node.children[token] = child
-                self.cached_token_count += 1
-                inserted_tokens += 1
-            else:
-                self._touch_node(child, access_index)
-                child.priority = priority
-            node = child
+        remainder = tuple(tokens[start_index:])
+        if not remainder:
+            return 0
 
-        return inserted_tokens
+        new_node = TreeNode(
+            key=remainder,
+            prefix=tuple(tokens),
+            parent=terminal_node,
+            created_at=access_index,
+            last_access_index=access_index,
+            access_count=1,
+            priority=priority,
+        )
+        terminal_node.children[remainder[0]] = new_node
+        self.cached_token_count += len(remainder)
+        self._update_leaf_status(terminal_node)
+        self._update_leaf_status(new_node)
+        return len(remainder)
 
     def iter_leaves(self) -> list[TreeNode]:
-        leaves: list[TreeNode] = []
-        stack = [self.root]
-
-        while stack:
-            node = stack.pop()
-            if node.is_root:
-                stack.extend(node.children.values())
-                continue
-            if node.is_leaf:
-                leaves.append(node)
-                continue
-            stack.extend(node.children.values())
-
-        return leaves
+        return list(self.evictable_leaves)
 
     def evict_until_within_budget(self) -> None:
         while self.cached_token_count > self.token_budget:
@@ -137,9 +114,113 @@ class RadixTree:
         if node.is_root or not node.is_leaf:
             raise ValueError("Only leaf nodes can be evicted")
 
-        del node.parent.children[node.token]
-        self.cached_token_count -= 1
+        del node.parent.children[node.key[0]]
+        self.cached_token_count -= len(node.key)
+        self.evictable_leaves.discard(node)
+        self._update_leaf_status(node.parent)
+
+    def _match_prefix(
+        self,
+        tokens: list[int],
+        access_index: int | None = None,
+    ) -> tuple[int, TreeNode]:
+        node = self.root
+        position = 0
+
+        while position < len(tokens):
+            child = node.children.get(tokens[position])
+            if child is None:
+                break
+
+            common = _common_prefix_len(child.key, tokens[position:])
+            if common == len(child.key):
+                if access_index is not None:
+                    self._touch_node(child, access_index)
+                node = child
+                position += common
+                continue
+
+            split_node = self._split_node(child, common, access_index)
+            if access_index is not None:
+                self._touch_node(split_node, access_index)
+            node = split_node
+            position += common
+            break
+
+        return position, node
+
+    def _locate_exact_node(self, tokens: list[int]) -> tuple[TreeNode, list[TreeNode]]:
+        if not tokens:
+            return self.root, []
+
+        node = self.root
+        path: list[TreeNode] = []
+        position = 0
+
+        while position < len(tokens):
+            child = node.children.get(tokens[position])
+            if child is None:
+                raise ValueError("Matched prefix is not present in the radix tree")
+
+            segment_length = len(child.key)
+            if tuple(tokens[position : position + segment_length]) != child.key:
+                raise ValueError("Matched prefix does not align with radix node boundaries")
+
+            node = child
+            path.append(node)
+            position += segment_length
+
+        return node, path
+
+    def _split_node(
+        self,
+        child: TreeNode,
+        split_len: int,
+        access_index: int | None,
+    ) -> TreeNode:
+        if split_len <= 0 or split_len >= len(child.key):
+            raise ValueError("Can only split inside an existing radix segment")
+
+        parent = child.parent
+        shared_key = child.key[:split_len]
+        suffix_key = child.key[split_len:]
+
+        new_node = TreeNode(
+            key=shared_key,
+            prefix=parent.prefix + shared_key,
+            parent=parent,
+            created_at=child.created_at if access_index is None else access_index,
+            last_access_index=child.last_access_index,
+            access_count=child.access_count,
+            priority=child.priority,
+        )
+        new_node.children[suffix_key[0]] = child
+        parent.children[shared_key[0]] = new_node
+
+        child.parent = new_node
+        child.key = suffix_key
+        self._update_leaf_status(child)
+        self._update_leaf_status(new_node)
+        self._update_leaf_status(parent)
+        return new_node
 
     def _touch_node(self, node: TreeNode, access_index: int) -> None:
         node.last_access_index = access_index
         node.access_count += 1
+
+    def _update_leaf_status(self, node: TreeNode | None) -> None:
+        if node is None or node.is_root:
+            return
+        if node.is_leaf:
+            self.evictable_leaves.add(node)
+        else:
+            self.evictable_leaves.discard(node)
+
+
+def _common_prefix_len(left: tuple[int, ...], right: list[int] | tuple[int, ...]) -> int:
+    match_length = 0
+    for left_token, right_token in zip(left, right):
+        if left_token != right_token:
+            break
+        match_length += 1
+    return match_length
