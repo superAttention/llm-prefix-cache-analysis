@@ -34,3 +34,20 @@ def test_analyze_against_belady_labels_shared_candidates_by_group():
     assert grouped[(1,)] == "A"   # LRU evicts (1,); Belady would keep it (next access in 1 step)
     assert grouped[(3,)] == "B"   # Belady evicts (3,); LRU keeps it (most recent)
     assert grouped[(2,)] == "D"   # both retain
+
+
+def test_analyze_against_belady_reports_progress():
+    trace = [[1], [2], [3], [1], [2]]
+    events = []
+
+    analyze_against_belady(
+        trace,
+        cache_size=2,
+        strategy_name="lru",
+        progress_callback=lambda completed, total, records: events.append((completed, total, records)),
+        progress_interval_seconds=0,
+    )
+
+    assert events
+    assert events[-1][0:2] == (5, 5)
+    assert events[-1][2] > 0

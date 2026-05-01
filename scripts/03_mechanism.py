@@ -27,6 +27,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--page-size", type=int, default=1, help="Number of tokens per cached block.")
     parser.add_argument("--near-window-multiplier", type=int, default=10)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--progress-interval",
+        type=float,
+        default=5.0,
+        help="Seconds between mechanism progress updates during each strategy analysis.",
+    )
+    parser.add_argument("--quiet", action="store_true", help="Suppress progress output.")
     return parser.parse_args()
 
 
@@ -44,17 +51,32 @@ def main() -> None:
     cache_size = args.cache_size or select_peak_gap_cache_size(results, baseline_name=args.baseline)
     strategies = args.strategies or [name for name in results if name != "tc_belady"]
 
-    mechanism = {
-        strategy_name: analyze_against_belady(
+    mechanism = {}
+    for strategy_index, strategy_name in enumerate(strategies, start=1):
+        if not args.quiet:
+            print(
+                f"[mechanism] {strategy_name} cache_size={cache_size} ({strategy_index}/{len(strategies)})",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        def report_progress(completed: int, total: int, records: int, name: str = strategy_name) -> None:
+            print(
+                f"[mechanism] {name} cache_size={cache_size}: {completed}/{total} accesses, {records} records",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        mechanism[strategy_name] = analyze_against_belady(
             trace=trace,
             cache_size=cache_size,
             strategy_name=strategy_name,
             near_window_multiplier=args.near_window_multiplier,
             seed=args.seed,
             page_size=args.page_size,
+            progress_callback=None if args.quiet else report_progress,
+            progress_interval_seconds=args.progress_interval,
         )
-        for strategy_name in strategies
-    }
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)

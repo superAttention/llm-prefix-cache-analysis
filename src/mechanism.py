@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from bisect import bisect_right
 from math import inf
+import time
+from typing import Callable
 
 import pandas as pd
 
@@ -41,6 +43,8 @@ def analyze_against_belady(
     near_window_multiplier: int = 10,
     seed: int = 0,
     page_size: int = 1,
+    progress_callback: Callable[[int, int, int], None] | None = None,
+    progress_interval_seconds: float = 5.0,
 ) -> pd.DataFrame:
     """Shadow-oracle approach: run one strategy simulation; at each eviction
     ask what TC-Belady would have chosen from the identical candidate pool.
@@ -55,6 +59,22 @@ def analyze_against_belady(
     simulator = registry[strategy_name](cache_size)
     access_history = _build_access_history(trace, page_size=page_size)
     records: list[dict[str, object]] = []
+    total_accesses = len(trace)
+    next_progress_at = time.monotonic() + progress_interval_seconds
+    last_progress: tuple[int, int] | None = None
+
+    def maybe_report_progress(completed: int, force: bool = False) -> None:
+        nonlocal next_progress_at, last_progress
+        if progress_callback is None:
+            return
+        progress = (completed, len(records))
+        if progress == last_progress:
+            return
+        now = time.monotonic()
+        if progress_interval_seconds <= 0 or force or now >= next_progress_at:
+            progress_callback(completed, total_accesses, len(records))
+            next_progress_at = now + progress_interval_seconds
+            last_progress = progress
 
     for access_index, tokens in enumerate(trace):
         result = simulator.lookup(tokens, access_index=access_index)
@@ -94,6 +114,9 @@ def analyze_against_belady(
 
             simulator.remove_leaf(strategy_victim)
             eviction_round += 1
+            maybe_report_progress(access_index + 1)
+
+        maybe_report_progress(access_index + 1, force=access_index + 1 == total_accesses)
 
     return pd.DataFrame.from_records(records)
 
