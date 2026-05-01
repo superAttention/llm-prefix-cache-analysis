@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.plotting import plot_gap_curve, plot_mechanism_scatter
+from src.plotting import _mechanism_group_summary, plot_gap_curve, plot_mechanism_scatter
 
 
 def test_plot_gap_curve_writes_pdf(tmp_path: Path):
@@ -33,8 +33,9 @@ def test_plot_gap_curve_writes_pdf(tmp_path: Path):
 def test_plot_mechanism_scatter_writes_pdf(tmp_path: Path):
     frame = pd.DataFrame.from_records(
         [
-            {"group": "A", "time_since_last_access": 8, "time_to_next_access": 2},
-            {"group": "C", "time_since_last_access": 7, "time_to_next_access": 9},
+            {"group": "A", "time_since_last_access": 8, "time_to_next_access": 2, "tree_depth": 10},
+            {"group": "B", "time_since_last_access": 0, "time_to_next_access": float("inf"), "tree_depth": 90},
+            {"group": "C", "time_since_last_access": 7, "time_to_next_access": 9, "tree_depth": 12},
         ]
     )
 
@@ -43,3 +44,18 @@ def test_plot_mechanism_scatter_writes_pdf(tmp_path: Path):
 
     assert output_path.exists()
     assert output_path.stat().st_size > 0
+
+
+def test_mechanism_group_summary_includes_depth_and_never_reuse_rate():
+    frame = pd.DataFrame.from_records(
+        [
+            {"group": "B", "time_since_last_access": 0, "time_to_next_access": float("inf"), "tree_depth": 100},
+            {"group": "B", "time_since_last_access": 2, "time_to_next_access": 6, "tree_depth": 80},
+        ]
+    )
+
+    summary = _mechanism_group_summary(frame)
+
+    assert summary.loc["B", "count"] == 2
+    assert summary.loc["B", "never_reuse_rate"] == 0.5
+    assert summary.loc["B", "median_tree_depth"] == 90

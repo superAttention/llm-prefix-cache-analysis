@@ -26,8 +26,9 @@ def test_plot_script_writes_both_figures(tmp_path: Path):
     mechanism = {
         "lru": pd.DataFrame.from_records(
             [
-                {"group": "A", "time_since_last_access": 8, "time_to_next_access": 2},
-                {"group": "C", "time_since_last_access": 7, "time_to_next_access": 9},
+                {"group": "A", "time_since_last_access": 8, "time_to_next_access": 2, "tree_depth": 10},
+                {"group": "B", "time_since_last_access": 0, "time_to_next_access": float("inf"), "tree_depth": 90},
+                {"group": "C", "time_since_last_access": 7, "time_to_next_access": 9, "tree_depth": 12},
             ]
         )
     }

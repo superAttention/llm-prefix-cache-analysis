@@ -1,0 +1,1276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prefix Cache Eviction Gap</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f4f1ec;
+      --paper: #fbfaf7;
+      --ink: #1a1a1a;
+      --ink-2: #2e2e2e;
+      --muted: #6b6660;
+      --muted-2: #9a958f;
+      --line: #e6e1d8;
+      --line-2: #d4cec3;
+
+      /* terracotta / rust accent */
+      --blue-50:  #fbf0ea;
+      --blue-100: #f6dccd;
+      --blue-200: #edbfa3;
+      --blue-300: #e09a76;
+      --blue-400: #d27851;
+      --blue-500: #c25b35;
+      --blue-600: #a8462a;
+      --blue-700: #853720;
+      --blue-800: #5e2818;
+      --blue-900: #3a1810;
+
+      /* sage secondary */
+      --sage-100: #e6ebe2;
+      --sage-300: #a8b59a;
+      --sage-500: #6e7d62;
+      --sage-700: #4a5740;
+
+      --accent: var(--blue-600);
+      --accent-soft: var(--blue-50);
+
+      --shadow-sm: 0 1px 2px rgba(40, 30, 20, 0.04), 0 1px 3px rgba(40, 30, 20, 0.06);
+      --shadow-md: 0 4px 12px rgba(40, 30, 20, 0.06), 0 1px 4px rgba(40, 30, 20, 0.04);
+      --shadow-lg: 0 24px 60px rgba(40, 30, 20, 0.08), 0 4px 12px rgba(40, 30, 20, 0.04);
+
+      --mono: "Geist Mono", "SFMono-Regular", "Menlo", monospace;
+      --sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      --serif: "Instrument Serif", "Iowan Old Style", "Apple Garamond", Georgia, serif;
+
+      --radius-sm: 8px;
+      --radius-md: 14px;
+      --radius-lg: 20px;
+      --radius-xl: 28px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      background-image:
+        radial-gradient(circle at 0% 0%, rgba(194, 91, 53, 0.08) 0%, transparent 35%),
+        radial-gradient(circle at 100% 0%, rgba(110, 125, 98, 0.06) 0%, transparent 30%);
+      background-attachment: fixed;
+      font-family: var(--sans);
+      line-height: 1.55;
+      font-feature-settings: "ss01", "cv11";
+      -webkit-font-smoothing: antialiased;
+      letter-spacing: -0.005em;
+    }
+
+    a { color: var(--blue-600); }
+    code, pre, .mono {
+      font-family: var(--mono);
+      font-size: 0.88em;
+      background: var(--blue-50);
+      color: var(--blue-800);
+      padding: 1px 6px;
+      border-radius: 5px;
+      letter-spacing: -0.01em;
+    }
+    .equation code, .equation { background: transparent; padding: 0; }
+
+    .shell {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+
+    /* ---------- Hero ---------- */
+    .hero {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-lg);
+      border-radius: var(--radius-xl);
+      overflow: hidden;
+      position: relative;
+    }
+    .hero::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, var(--blue-700), var(--blue-400), var(--blue-700));
+    }
+    .hero-inner {
+      position: relative;
+      padding: 48px 48px 40px;
+      display: grid;
+      grid-template-columns: 1.3fr 0.9fr;
+      gap: 40px;
+      align-items: start;
+    }
+
+    h1, h2, h3 {
+      line-height: 1.08;
+      margin: 0 0 14px;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      color: var(--ink);
+    }
+    h1 {
+      font-family: var(--serif);
+      font-size: clamp(2.8rem, 5.2vw, 4.6rem);
+      letter-spacing: -0.02em;
+      max-width: 14ch;
+      font-weight: 400;
+      line-height: 1.0;
+    }
+    h1 em { font-style: italic; color: var(--blue-600); }
+    h2 {
+      font-size: clamp(1.5rem, 2vw, 2rem);
+      letter-spacing: -0.03em;
+      margin-bottom: 8px;
+    }
+    h3 {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--blue-600);
+      font-weight: 600;
+    }
+
+    .kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 18px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--blue-200);
+      background: var(--blue-50);
+      color: var(--blue-700);
+      font-size: 0.78rem;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .kicker::before {
+      content: "";
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--blue-500);
+      box-shadow: 0 0 0 3px rgba(47, 107, 234, 0.2);
+    }
+
+    .lede {
+      max-width: 60ch;
+      font-size: 1.08rem;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 22px;
+    }
+    .chip {
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 0.84rem;
+      border: 1px solid var(--line);
+      background: var(--paper);
+      color: var(--ink-2);
+      font-family: var(--mono);
+      font-weight: 500;
+    }
+
+    .hero-metrics {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      align-content: start;
+    }
+    .metric-card {
+      padding: 18px 16px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+    }
+    .metric-card:hover {
+      transform: translateY(-2px);
+      border-color: var(--blue-300);
+      box-shadow: var(--shadow-md);
+    }
+    .metric-card .value {
+      display: block;
+      font-size: 1.6rem;
+      letter-spacing: -0.04em;
+      font-weight: 700;
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }
+    .metric-card .label {
+      color: var(--muted);
+      font-size: 0.84rem;
+      margin-top: 4px;
+    }
+    .metric-card.highlight {
+      background: linear-gradient(180deg, #2e2e2e, #1a1a1a);
+      border-color: #1a1a1a;
+    }
+    .metric-card.highlight .value { color: #fff; }
+    .metric-card.highlight .label { color: var(--blue-200); }
+
+    /* ---------- Nav ---------- */
+    .nav {
+      position: sticky;
+      top: 12px;
+      z-index: 20;
+      margin: 22px 0 28px;
+      backdrop-filter: blur(14px) saturate(1.4);
+      -webkit-backdrop-filter: blur(14px) saturate(1.4);
+      background: rgba(255, 255, 255, 0.82);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      box-shadow: var(--shadow-md);
+      padding: 6px;
+    }
+    .nav ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .nav a {
+      display: inline-block;
+      padding: 8px 14px;
+      border-radius: 999px;
+      text-decoration: none;
+      color: var(--ink-2);
+      font-size: 0.88rem;
+      font-weight: 500;
+      transition: background .15s ease, color .15s ease;
+    }
+    .nav a:hover {
+      background: var(--blue-50);
+      color: var(--blue-700);
+    }
+
+    /* ---------- Sections ---------- */
+    .section {
+      margin-top: 20px;
+      padding: 36px 40px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow-sm);
+    }
+    .section-grid {
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 32px;
+      align-items: start;
+    }
+    .section p { margin: 0 0 14px; color: var(--ink-2); }
+    .section p:last-child { margin-bottom: 0; }
+
+    /* ---------- Callouts ---------- */
+    .callout, .mini-panel {
+      border-radius: var(--radius-lg);
+      padding: 20px 22px;
+      border: 1px solid var(--line);
+      background: var(--paper);
+    }
+    .callout {
+      background: var(--blue-50);
+      border-color: var(--blue-100);
+    }
+    .callout h3 { color: var(--blue-700); margin-bottom: 10px; }
+    .callout p { color: var(--ink-2); }
+
+    .callout.dark {
+      background: linear-gradient(180deg, #2e2e2e, #1a1a1a);
+      border-color: #1a1a1a;
+      color: #fff;
+    }
+    .callout.dark h3 { color: var(--blue-200); }
+    .callout.dark p, .callout.dark li { color: rgba(255,255,255,0.85); }
+    .callout.dark code { background: rgba(255,255,255,0.12); color: #fff; }
+
+    .callout.outline {
+      background: var(--paper);
+      border: 1px solid var(--line);
+    }
+    .callout.outline h3 { color: var(--blue-700); }
+
+    .mini-panel {
+      background: var(--paper);
+      border: 1px dashed var(--line-2);
+      font-size: 0.94rem;
+      color: var(--ink-2);
+    }
+    .mini-panel strong { color: var(--ink); }
+
+    .equation {
+      display: inline-block;
+      margin: 6px 0;
+      padding: 10px 16px;
+      background: var(--ink);
+      color: #d6e4ff;
+      border-radius: 10px;
+      font-family: var(--mono);
+      font-size: 0.92rem;
+      letter-spacing: -0.01em;
+    }
+    .equation .op { color: var(--blue-300); }
+    .equation .var { color: #fff; font-weight: 600; }
+
+    /* ---------- Tables ---------- */
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      margin-top: 14px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+    th, td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: middle;
+    }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover { background: var(--blue-50); }
+    thead th {
+      font-size: 0.74rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      background: #f4f1ec;
+      font-weight: 600;
+      border-bottom: 1px solid var(--line);
+    }
+    .benchmark-table th:not(:first-child),
+    .benchmark-table td:not(:first-child),
+    .numeric {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-family: var(--mono);
+    }
+    .row-highlight td {
+      background: var(--blue-50);
+      font-weight: 600;
+      color: var(--blue-800);
+    }
+    .row-highlight td code { background: var(--blue-100); }
+
+    /* ---------- SVG diagrams ---------- */
+    .svg-wrap {
+      padding: 8px;
+      background: linear-gradient(180deg, #f4f1ec, #f1f6fc);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--line);
+    }
+    svg {
+      width: 100%;
+      height: auto;
+      display: block;
+      font-family: var(--sans);
+    }
+    svg text { fill: var(--ink); }
+    svg .mono { font-family: var(--mono); }
+    svg .label { font-size: 13px; fill: var(--muted); }
+    svg .title { font-size: 16px; font-weight: 600; fill: var(--ink); letter-spacing: -0.01em; }
+
+    /* ---------- Legend ---------- */
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .legend-item {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      font-size: 0.92rem;
+      color: var(--ink-2);
+    }
+    .swatch {
+      width: 14px;
+      height: 14px;
+      border-radius: 4px;
+      margin-top: 4px;
+      flex: 0 0 auto;
+    }
+
+    .two-col-list {
+      columns: 2;
+      column-gap: 28px;
+      margin: 14px 0 0;
+      padding-left: 18px;
+      color: var(--ink-2);
+    }
+    .two-col-list li {
+      margin-bottom: 8px;
+      break-inside: avoid;
+    }
+
+    .footer-note {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .section-head {
+      margin-bottom: 22px;
+    }
+    .section-head .num {
+      display: inline-block;
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      color: var(--blue-600);
+      background: var(--blue-50);
+      padding: 3px 8px;
+      border-radius: 6px;
+      margin-bottom: 10px;
+      font-weight: 500;
+    }
+
+    @media (max-width: 980px) {
+      .hero-inner,
+      .section-grid,
+      .legend {
+        grid-template-columns: 1fr;
+      }
+      .two-col-list { columns: 1; }
+      .section { padding: 28px 24px; }
+      .hero-inner { padding: 32px 28px; }
+    }
+    @media (max-width: 680px) {
+      .shell { padding: 18px 14px 40px; }
+      .hero-inner { padding: 26px 20px; }
+      .hero-metrics { grid-template-columns: 1fr 1fr; }
+      .nav { border-radius: var(--radius-lg); }
+      .nav ul { gap: 4px; }
+      .nav a { padding: 6px 10px; font-size: 0.84rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+
+    <!-- HERO -->
+    <header class="hero" id="top">
+      <div class="hero-inner">
+        <div>
+          <div class="kicker">Technical Explainer</div>
+          <h1>Prefix Cache Eviction Gap</h1>
+          <p class="lede">
+            How the trace is built, how the radix cache is modeled, why the offline
+            oracle is defined the way it is, how the shadow-oracle mechanism analysis
+            works, and what motivated the <code>depth_lru</code> heuristic.
+          </p>
+          <div class="chips">
+            <span class="chip">ShareGPT snapshot</span>
+            <span class="chip">Llama-3 alt tokenizer</span>
+            <span class="chip">fixed-block radix</span>
+            <span class="chip">300 conversations</span>
+          </div>
+        </div>
+        <div class="hero-metrics">
+          <div class="metric-card">
+            <span class="value">300</span>
+            <span class="label">conversations</span>
+          </div>
+          <div class="metric-card">
+            <span class="value">978</span>
+            <span class="label">accesses</span>
+          </div>
+          <div class="metric-card">
+            <span class="value">811,050</span>
+            <span class="label">requested tokens</span>
+          </div>
+          <div class="metric-card">
+            <span class="value">319,862</span>
+            <span class="label">unique prefixes</span>
+          </div>
+          <div class="metric-card highlight">
+            <span class="value">80.2%</span>
+            <span class="label">LRU peak gap</span>
+          </div>
+          <div class="metric-card highlight">
+            <span class="value">79.3%</span>
+            <span class="label">DepthLRU peak gap</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- NAV -->
+    <nav class="nav" aria-label="Section navigation">
+      <ul>
+        <li><a href="#abstract">Abstract</a></li>
+        <li><a href="#trace-construction">Trace</a></li>
+        <li><a href="#cache-model">Cache Model</a></li>
+        <li><a href="#policies">Policies</a></li>
+        <li><a href="#offline-oracle">Oracle</a></li>
+        <li><a href="#mechanism-analysis">Mechanism</a></li>
+        <li><a href="#heuristic-motivation">DepthLRU</a></li>
+        <li><a href="#results">Results</a></li>
+        <li><a href="#fidelity">Fidelity</a></li>
+      </ul>
+    </nav>
+
+    <!-- ABSTRACT -->
+    <section class="section" id="abstract">
+      <div class="section-head">
+        <span class="num">01 / Abstract</span>
+        <h2>The narrow question</h2>
+      </div>
+      <div class="section-grid">
+        <div>
+          <p>
+            The core question is narrower than generic Belady framing: on a
+            ShareGPT-style chat trace, how large is the gap between common online
+            prefix-cache eviction policies and an upper bound under the same
+            leaf-only candidate constraint?
+          </p>
+          <p>
+            The current repository answers that question under a deliberately clean
+            model. Each cached radix node stores exactly one fixed-size block. The
+            reported benchmark uses <code>page_size = 1</code>, so one block equals
+            one token for accounting. In plain terms, this is a diagnostic baseline,
+            not a production-faithful page configuration, but it preserves the
+            explicit block-eviction semantics needed for a well-defined oracle.
+          </p>
+          <p>
+            The key result is large: <code>lru</code> reaches a peak relative gap of
+            <strong>80.2%</strong> versus <code>tc_belady</code> at
+            <strong>1271 blocks</strong>. The main failure mode is not random noise.
+            It is a systematic tendency to keep freshly touched deep tail blocks that
+            are already dead, which motivated the <code>depth_lru</code> heuristic.
+          </p>
+        </div>
+        <aside class="callout dark">
+          <h3>Research scope</h3>
+          <p>
+            Not a full production simulator of all SGLang features. A report-oriented
+            eviction study under a fixed-block, page-aligned radix model with a
+            tree-constrained offline oracle and a shadow-oracle mechanism analysis.
+          </p>
+          <p>
+            The safe reading: this measures an upper bound under the same leaf-only
+            candidate constraint, not an unconstrained global optimum.
+          </p>
+          <div class="equation"><span class="var">relative_gap</span> <span class="op">=</span> (tc_belady <span class="op">−</span> baseline) <span class="op">/</span> tc_belady</div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- TRACE -->
+    <section class="section" id="trace-construction">
+      <div class="section-head">
+        <span class="num">02 / Trace</span>
+        <h2>Trace construction</h2>
+      </div>
+      <div class="section-grid">
+        <div>
+          <p>
+            The input data is a cached local snapshot of
+            <code>ShareGPT_Vicuna_unfiltered</code>. Each conversation is processed
+            in order. Every human turn becomes one access, and the accessed object
+            is the entire accumulated prompt prefix up to that turn.
+          </p>
+          <p>
+            This matters because the cache is not serving isolated utterances. It is
+            serving prefixes that grow over time. A later request can hit a long
+            shared prefix even when the final tail diverges.
+          </p>
+          <p>
+            Across conversations, accesses are globally interleaved rather than
+            concatenated sequentially. The resulting benchmark trace contains
+            <strong>300 conversations</strong> and <strong>978 accesses</strong>.
+          </p>
+          <div class="mini-panel" style="margin-top:14px;">
+            <strong>Tokenizer.</strong>
+            The benchmark uses <code>Meta-Llama-3-8B-Alternate-Tokenizer</code>.
+            The serialized trace remains token-level; blocking is applied later
+            inside the simulator.
+          </div>
+          <div class="mini-panel" style="margin-top:10px;">
+            <strong>Arrival model.</strong>
+            Interleaving order is random with seed 0 — a modeling choice, not a
+            measured production arrival schedule.
+          </div>
+        </div>
+        <div class="svg-wrap">
+          <svg viewBox="0 0 720 380" role="img" aria-label="Conversation interleaving diagram">
+            <defs>
+              <marker id="arr1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M0 0 L10 5 L0 10 z" fill="#a8462a"/>
+              </marker>
+              <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M0 0 L10 5 L0 10 z" fill="#6e7d62"/>
+              </marker>
+            </defs>
+            <rect x="0" y="0" width="720" height="380" rx="14" fill="#ffffff"/>
+            <text x="24" y="32" class="title">Human turns → prefix accesses → interleaved trace</text>
+
+            <!-- Conv A -->
+            <rect x="20" y="60" width="240" height="130" rx="12" fill="#ffffff" stroke="#a8462a" stroke-width="1.5"/>
+            <text x="34" y="84" font-size="13" font-weight="600" fill="#a8462a">Conversation A</text>
+            <text x="34" y="108" font-size="12" fill="#2e2e2e">A1 · "How does eviction work?"</text>
+            <text x="34" y="130" font-size="12" fill="#9a958f">A2 · assistant reply</text>
+            <text x="34" y="152" font-size="12" fill="#2e2e2e">A3 · "What about Belady?"</text>
+            <text x="34" y="174" font-size="12" fill="#9a958f">A4 · assistant reply</text>
+
+            <!-- Conv B -->
+            <rect x="20" y="210" width="240" height="130" rx="12" fill="#ffffff" stroke="#6e7d62" stroke-width="1.5"/>
+            <text x="34" y="234" font-size="13" font-weight="600" fill="#6e7d62">Conversation B</text>
+            <text x="34" y="258" font-size="12" fill="#2e2e2e">B1 · "LRU failure modes"</text>
+            <text x="34" y="280" font-size="12" fill="#9a958f">B2 · assistant reply</text>
+            <text x="34" y="302" font-size="12" fill="#2e2e2e">B3 · "Can depth help?"</text>
+
+            <!-- Arrows -->
+            <path d="M260 110 C 340 110, 360 110, 440 110" fill="none" stroke="#a8462a" stroke-width="2" marker-end="url(#arr1)"/>
+            <path d="M260 154 C 340 154, 360 152, 440 152" fill="none" stroke="#a8462a" stroke-width="2" marker-end="url(#arr1)" stroke-dasharray="4 4"/>
+            <path d="M260 260 C 340 260, 360 196, 440 196" fill="none" stroke="#6e7d62" stroke-width="2" marker-end="url(#arr2)"/>
+            <path d="M260 304 C 340 304, 360 240, 440 240" fill="none" stroke="#6e7d62" stroke-width="2" marker-end="url(#arr2)" stroke-dasharray="4 4"/>
+
+            <!-- Trace -->
+            <rect x="450" y="60" width="250" height="280" rx="12" fill="#f4f1ec" stroke="#d4cec3"/>
+            <text x="464" y="84" font-size="13" font-weight="600" fill="#1a1a1a">Global interleaved trace</text>
+
+            <rect x="464" y="96" width="222" height="30" rx="8" fill="#f6dccd" stroke="#a8462a" stroke-width="1"/>
+            <text x="476" y="115" font-size="12" font-weight="500" fill="#853720">access 0 · A1 prefix</text>
+
+            <rect x="464" y="134" width="222" height="30" rx="8" fill="#fbf0ea" stroke="#6e7d62" stroke-width="1"/>
+            <text x="476" y="153" font-size="12" font-weight="500" fill="#a8462a">access 1 · B1 prefix</text>
+
+            <rect x="464" y="172" width="222" height="30" rx="8" fill="#f6dccd" stroke="#a8462a" stroke-width="1"/>
+            <text x="476" y="191" font-size="12" font-weight="500" fill="#853720">access 2 · A3 prefix</text>
+
+            <rect x="464" y="210" width="222" height="30" rx="8" fill="#fbf0ea" stroke="#6e7d62" stroke-width="1"/>
+            <text x="476" y="229" font-size="12" font-weight="500" fill="#a8462a">access 3 · B3 prefix</text>
+
+            <text x="464" y="262" font-size="11" fill="#9a958f">… 974 more accesses, seeded random order …</text>
+
+            <rect x="464" y="280" width="222" height="44" rx="8" fill="#a8462a"/>
+            <text x="476" y="299" font-size="11" fill="#fbfaf7" font-weight="500">TOTAL</text>
+            <text x="476" y="316" font-size="13" fill="#ffffff" font-weight="600">978 accesses · 300 conversations</text>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <!-- CACHE MODEL -->
+    <section class="section" id="cache-model">
+      <div class="section-head">
+        <span class="num">03 / Model</span>
+        <h2>Fixed-block cache model</h2>
+      </div>
+      <div class="section-grid">
+        <div>
+          <p>
+            The simulator uses a fixed-size block radix tree. Each node stores
+            exactly one block. Prefix matching only counts on full block boundaries.
+            A trailing partial block is still a block and still consumes one unit of
+            cache capacity.
+          </p>
+          <p>
+            In the current benchmark, <code>page_size = 1</code>. That removes
+            internal fragmentation from the reported run while keeping the explicit
+            block semantics that make the offline oracle tractable.
+          </p>
+          <div class="callout">
+            <h3>Accounting rule</h3>
+            <p>
+              Benefit is measured in reused tokens and reused full requests. Cost is
+              measured in blocks. Under the current run, the full-cache point is
+              <strong>319,862 blocks</strong>, which matches the number of unique
+              block prefixes in the trace.
+            </p>
+          </div>
+          <ul class="two-col-list">
+            <li>one radix node per block</li>
+            <li>block budget, not token budget</li>
+            <li>leaf-only online eviction</li>
+            <li>full-block prefix hits only</li>
+            <li>same tree for online and offline</li>
+            <li>explicit candidate leaf set</li>
+          </ul>
+        </div>
+        <div class="svg-wrap">
+          <svg viewBox="0 0 720 420" role="img" aria-label="Token to block to radix tree diagram">
+            <rect x="0" y="0" width="720" height="420" rx="14" fill="#ffffff"/>
+            <text x="24" y="32" class="title">Token stream → blocks → radix path</text>
+
+            <!-- Step 1: tokens -->
+            <text x="24" y="64" class="label">1. Request tokens</text>
+            <g font-family="Geist Mono, monospace" font-size="13">
+              <rect x="24" y="76" width="44" height="36" rx="6" fill="#fbf0ea" stroke="#edbfa3"/>
+              <text x="40" y="100" fill="#853720">t1</text>
+              <rect x="74" y="76" width="44" height="36" rx="6" fill="#fbf0ea" stroke="#edbfa3"/>
+              <text x="90" y="100" fill="#853720">t2</text>
+              <rect x="124" y="76" width="44" height="36" rx="6" fill="#fbf0ea" stroke="#edbfa3"/>
+              <text x="140" y="100" fill="#853720">t3</text>
+              <rect x="174" y="76" width="44" height="36" rx="6" fill="#fbf0ea" stroke="#edbfa3"/>
+              <text x="190" y="100" fill="#853720">t4</text>
+              <rect x="224" y="76" width="44" height="36" rx="6" fill="#fbf0ea" stroke="#edbfa3"/>
+              <text x="240" y="100" fill="#853720">t5</text>
+            </g>
+
+            <!-- Step 2: blocks -->
+            <text x="24" y="156" class="label">2. Chunk at page_size = 1 → one block per token</text>
+            <g font-family="Geist Mono, monospace" font-size="12">
+              <rect x="24" y="168" width="44" height="36" rx="6" fill="#a8462a"/>
+              <text x="35" y="192" fill="#ffffff">b1</text>
+              <rect x="74" y="168" width="44" height="36" rx="6" fill="#a8462a"/>
+              <text x="85" y="192" fill="#ffffff">b2</text>
+              <rect x="124" y="168" width="44" height="36" rx="6" fill="#a8462a"/>
+              <text x="135" y="192" fill="#ffffff">b3</text>
+              <rect x="174" y="168" width="44" height="36" rx="6" fill="#a8462a"/>
+              <text x="185" y="192" fill="#ffffff">b4</text>
+              <rect x="224" y="168" width="44" height="36" rx="6" fill="#a8462a"/>
+              <text x="235" y="192" fill="#ffffff">b5</text>
+            </g>
+
+            <!-- Step 3 label -->
+            <text x="24" y="248" class="label">3. Insert as radix nodes (one per block)</text>
+
+            <!-- arrow from rightmost block down and around to tree (clear of step-3 text) -->
+            <path d="M268 186 C 320 186, 360 186, 400 186 L 400 84" fill="none" stroke="#6b6660" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#arr1)"/>
+
+            <!-- Tree -->
+            <g>
+              <line x1="430" y1="90" x2="500" y2="130" stroke="#d4cec3" stroke-width="2"/>
+              <line x1="500" y1="146" x2="540" y2="186" stroke="#d4cec3" stroke-width="2"/>
+              <line x1="540" y1="202" x2="580" y2="242" stroke="#d4cec3" stroke-width="2"/>
+              <line x1="580" y1="258" x2="620" y2="298" stroke="#d4cec3" stroke-width="2"/>
+              <line x1="620" y1="314" x2="660" y2="354" stroke="#d4cec3" stroke-width="2"/>
+
+              <circle cx="430" cy="84" r="20" fill="#ffffff" stroke="#1a1a1a" stroke-width="2"/>
+              <text x="430" y="89" text-anchor="middle" font-size="13" font-weight="600">R</text>
+
+              <circle cx="500" cy="138" r="20" fill="#f6dccd" stroke="#a8462a" stroke-width="2"/>
+              <text x="500" y="143" text-anchor="middle" font-size="12" font-family="Geist Mono, monospace" fill="#853720">b1</text>
+
+              <circle cx="540" cy="194" r="20" fill="#f6dccd" stroke="#a8462a" stroke-width="2"/>
+              <text x="540" y="199" text-anchor="middle" font-size="12" font-family="Geist Mono, monospace" fill="#853720">b2</text>
+
+              <circle cx="580" cy="250" r="20" fill="#f6dccd" stroke="#a8462a" stroke-width="2"/>
+              <text x="580" y="255" text-anchor="middle" font-size="12" font-family="Geist Mono, monospace" fill="#853720">b3</text>
+
+              <circle cx="620" cy="306" r="20" fill="#f6dccd" stroke="#a8462a" stroke-width="2"/>
+              <text x="620" y="311" text-anchor="middle" font-size="12" font-family="Geist Mono, monospace" fill="#853720">b4</text>
+
+              <circle cx="660" cy="362" r="20" fill="#a8462a" stroke="#a8462a" stroke-width="2"/>
+              <text x="660" y="367" text-anchor="middle" font-size="12" font-family="Geist Mono, monospace" fill="#ffffff">b5</text>
+
+              <text x="688" y="367" font-size="11" fill="#9a958f">leaf</text>
+            </g>
+
+            <!-- Annotations -->
+            <text x="24" y="290" font-size="12" fill="#6b6660">Each node holds exactly one</text>
+            <text x="24" y="308" font-size="12" fill="#6b6660">fixed-size block.</text>
+            <text x="24" y="338" font-size="12" fill="#6b6660">Eviction occurs at leaf</text>
+            <text x="24" y="356" font-size="12" fill="#6b6660">blocks only.</text>
+
+            <text x="24" y="394" font-size="12" font-family="Geist Mono, monospace" fill="#a8462a">page_size = 1</text>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <!-- POLICIES -->
+    <section class="section" id="policies">
+      <div class="section-head">
+        <span class="num">04 / Policies</span>
+        <h2>Eviction policies under comparison</h2>
+      </div>
+      <p>
+        The simulator supports standard online policies, one heuristic, and one
+        offline upper bound. All online policies operate on the same block radix
+        tree and choose from the same current leaf set.
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Policy</th>
+              <th>Priority key</th>
+              <th>Interpretation</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>lru</code></td><td><code>last_access_index</code></td><td>Evict oldest-by-recency leaf block.</td></tr>
+            <tr><td><code>lfu</code></td><td><code>(access_count, last_access_index)</code></td><td>Low-frequency leaves first, then old ones.</td></tr>
+            <tr><td><code>fifo</code></td><td><code>created_at</code></td><td>Evict oldest inserted leaf block.</td></tr>
+            <tr><td><code>mru</code></td><td><code>-last_access_index</code></td><td>Most recent leaves first.</td></tr>
+            <tr><td><code>filo</code></td><td><code>-created_at</code></td><td>Newest inserted leaves first.</td></tr>
+            <tr><td><code>slru</code></td><td><code>(segment, last_access_index)</code></td><td>Two-segment recency split via access-count threshold.</td></tr>
+            <tr><td><code>priority</code></td><td><code>(node.priority, last_access_index)</code></td><td>Matches SGLang's priority-aware rule.</td></tr>
+            <tr><td><code>random</code></td><td><code>uniform random</code></td><td>Lower-bound sanity baseline.</td></tr>
+            <tr class="row-highlight"><td><code>depth_lru</code></td><td><code>last_access_index − α · depth</code></td><td>Recency with depth penalty against false warmth.</td></tr>
+            <tr class="row-highlight"><td><code>tc_belady</code></td><td><code>future next-use distance</code></td><td>Tree-constrained offline oracle (upper bound).</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout" style="margin-top:18px;">
+        <h3>Priority policy note</h3>
+        <p>
+          In SGLang, request metadata can carry a priority value that is propagated
+          into the radix cache. The local simulator implements the same rule, but
+          the current ShareGPT trace carries no request-priority metadata. Every
+          node receives priority <code>0</code>, so priority reduces to plain
+          <code>lru</code> in this benchmark.
+        </p>
+      </div>
+    </section>
+
+    <!-- ORACLE -->
+    <section class="section" id="offline-oracle">
+      <div class="section-head">
+        <span class="num">05 / Oracle</span>
+        <h2>Tree-constrained offline oracle</h2>
+      </div>
+      <div class="section-grid">
+        <div>
+          <p>
+            The offline comparator remains named <code>tc_belady</code>, but under
+            the current design it is the offline optimum for the simplified
+            fixed-block model, not for unconstrained token caching in the abstract.
+          </p>
+          <p>
+            The critical restriction is that online and offline policies share the
+            same object model: one node per block, one leaf-block eviction unit, and
+            the same candidate pool at each eviction event. The oracle evicts the
+            leaf block whose block-aligned prefix is reused farthest in the future.
+          </p>
+          <div class="equation"><span class="var">victim</span> <span class="op">=</span> argmax<sub>leaf</sub> next_access(prefix)</div>
+          <p>
+            In report terms, this is an upper bound under the same leaf-only
+            candidate constraint. It does not measure a broader optimum that could
+            restructure the tree or release non-leaf state early.
+          </p>
+        </div>
+        <div class="svg-wrap">
+          <svg viewBox="0 0 720 380" role="img" aria-label="Offline oracle leaf selection diagram">
+            <rect x="0" y="0" width="720" height="380" rx="14" fill="#ffffff"/>
+            <text x="24" y="32" class="title">At overflow: choose among current leaf blocks only</text>
+
+            <!-- Tree -->
+            <g>
+              <line x1="120" y1="100" x2="180" y2="156" stroke="#d4cec3" stroke-width="2"/>
+              <line x1="180" y1="170" x2="240" y2="226" stroke="#d4cec3" stroke-width="2"/>
+              <line x1="120" y1="100" x2="120" y2="226" stroke="#d4cec3" stroke-width="2"/>
+              <line x1="120" y1="240" x2="180" y2="296" stroke="#d4cec3" stroke-width="2"/>
+
+              <circle cx="120" cy="92" r="20" fill="#ffffff" stroke="#1a1a1a" stroke-width="2"/>
+              <text x="120" y="97" text-anchor="middle" font-size="13" font-weight="600">R</text>
+
+              <circle cx="180" cy="164" r="20" fill="#f6dccd" stroke="#a8462a" stroke-width="2"/>
+              <text x="180" y="169" text-anchor="middle" font-size="11" font-family="Geist Mono, monospace" fill="#853720">p1</text>
+
+              <circle cx="240" cy="234" r="22" fill="#a8462a" stroke="#a8462a" stroke-width="2"/>
+              <text x="240" y="239" text-anchor="middle" font-size="11" font-family="Geist Mono, monospace" fill="#ffffff">p2</text>
+              <text x="240" y="276" text-anchor="middle" font-size="10" fill="#6b6660">leaf</text>
+
+              <circle cx="120" cy="234" r="20" fill="#f6dccd" stroke="#a8462a" stroke-width="2"/>
+              <text x="120" y="239" text-anchor="middle" font-size="11" font-family="Geist Mono, monospace" fill="#853720">q0</text>
+
+              <circle cx="180" cy="304" r="22" fill="#a8462a" stroke="#a8462a" stroke-width="2"/>
+              <text x="180" y="309" text-anchor="middle" font-size="11" font-family="Geist Mono, monospace" fill="#ffffff">q1</text>
+              <text x="180" y="346" text-anchor="middle" font-size="10" fill="#6b6660">leaf</text>
+            </g>
+
+            <!-- Candidate cards -->
+            <text x="320" y="62" class="label">Candidate leaves &amp; next access</text>
+
+            <rect x="320" y="80" width="370" height="58" rx="10" fill="#fbf0ea" stroke="#edbfa3"/>
+            <text x="338" y="106" font-size="13" font-weight="600" fill="#853720">leaf p2</text>
+            <text x="338" y="124" font-size="12" fill="#2e2e2e">next access in <tspan font-family="Geist Mono, monospace" font-weight="600">9</tspan> steps</text>
+
+            <rect x="320" y="148" width="370" height="58" rx="10" fill="#a8462a"/>
+            <text x="338" y="174" font-size="13" font-weight="600" fill="#ffffff">leaf q1</text>
+            <text x="338" y="192" font-size="12" fill="#f6dccd">next access in <tspan font-family="Geist Mono, monospace" font-weight="600">∞</tspan> steps  ← farthest</text>
+
+            <rect x="320" y="216" width="370" height="58" rx="10" fill="#fbf0ea" stroke="#edbfa3"/>
+            <text x="338" y="242" font-size="13" font-weight="600" fill="#853720">leaf r1</text>
+            <text x="338" y="260" font-size="12" fill="#2e2e2e">next access in <tspan font-family="Geist Mono, monospace" font-weight="600">2</tspan> steps</text>
+
+            <!-- Verdict -->
+            <rect x="320" y="294" width="370" height="56" rx="10" fill="#ffffff" stroke="#a8462a" stroke-width="2"/>
+            <text x="338" y="318" font-size="12" font-weight="600" fill="#a8462a">ORACLE DECISION</text>
+            <text x="338" y="338" font-size="13" fill="#1a1a1a">Evict <tspan font-family="Geist Mono, monospace" font-weight="600">q1</tspan> — its next-use distance is largest.</text>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <!-- MECHANISM -->
+    <section class="section" id="mechanism-analysis">
+      <div class="section-head">
+        <span class="num">06 / Mechanism</span>
+        <h2>Shadow-oracle mechanism analysis</h2>
+      </div>
+      <div class="section-grid">
+        <div>
+          <p>
+            The mechanism analysis does not run two independent simulations and
+            compare their final trees. That would confound the result with divergent
+            state trajectories. Instead, it uses a shadow-oracle design.
+          </p>
+          <p>
+            One online strategy drives the real simulation. At each eviction event,
+            the code inspects the exact same current leaf set and asks what
+            <code>tc_belady</code> would have evicted from that candidate pool.
+          </p>
+          <div class="equation">|<span class="var">A</span>| <span class="op">=</span> |<span class="var">B</span>| <span class="op">=</span> number of disagreement events</div>
+          <p>
+            The invariant holds because each disagreement contributes exactly one
+            online-only victim and one oracle-only victim.
+          </p>
+          <div class="legend">
+            <div class="legend-item"><span class="swatch" style="background:#a8462a;"></span><span><strong>A</strong> · online evicts, oracle retains</span></div>
+            <div class="legend-item"><span class="swatch" style="background:#6e7d62;"></span><span><strong>B</strong> · oracle evicts, online retains</span></div>
+            <div class="legend-item"><span class="swatch" style="background:#d4cec3;"></span><span><strong>C</strong> · both evict same leaf</span></div>
+            <div class="legend-item"><span class="swatch" style="background:#fbf0ea; border:1px solid #d4cec3;"></span><span><strong>D</strong> · both retain leaf</span></div>
+          </div>
+        </div>
+        <div class="svg-wrap">
+          <svg viewBox="0 0 720 420" role="img" aria-label="Shadow oracle group diagram">
+            <rect x="0" y="0" width="720" height="420" rx="14" fill="#ffffff"/>
+            <text x="24" y="32" class="title">Group labels at one shared eviction event</text>
+
+            <!-- A -->
+            <rect x="24" y="56" width="332" height="160" rx="14" fill="#a8462a"/>
+            <text x="46" y="92" font-size="34" font-weight="800" fill="#ffffff">A</text>
+            <text x="100" y="82" font-size="13" font-weight="600" fill="#edbfa3">online evicts</text>
+            <text x="100" y="100" font-size="13" font-weight="600" fill="#edbfa3">oracle retains</text>
+            <line x1="46" y1="118" x2="334" y2="118" stroke="#6e7d62" stroke-opacity="0.4"/>
+            <text x="46" y="142" font-size="12" fill="#f6dccd">Typical interpretation:</text>
+            <text x="46" y="162" font-size="13" fill="#ffffff" font-weight="500">useful block thrown away too early.</text>
+            <text x="46" y="194" font-size="11" fill="#a8b59a" font-family="Geist Mono, monospace">↑ premature eviction</text>
+
+            <!-- B -->
+            <rect x="364" y="56" width="332" height="160" rx="14" fill="#a8462a"/>
+            <text x="386" y="92" font-size="34" font-weight="800" fill="#ffffff">B</text>
+            <text x="440" y="82" font-size="13" font-weight="600" fill="#edbfa3">oracle evicts</text>
+            <text x="440" y="100" font-size="13" font-weight="600" fill="#edbfa3">online retains</text>
+            <line x1="386" y1="118" x2="674" y2="118" stroke="#6e7d62" stroke-opacity="0.4"/>
+            <text x="386" y="142" font-size="12" fill="#f6dccd">Typical interpretation:</text>
+            <text x="386" y="162" font-size="13" fill="#ffffff" font-weight="500">dead block survives — looks warm.</text>
+            <text x="386" y="194" font-size="11" fill="#a8b59a" font-family="Geist Mono, monospace">↑ false warmth</text>
+
+            <!-- C -->
+            <rect x="24" y="234" width="332" height="160" rx="14" fill="#ffffff" stroke="#d4cec3" stroke-width="1.5"/>
+            <text x="46" y="270" font-size="34" font-weight="800" fill="#6b6660">C</text>
+            <text x="100" y="260" font-size="13" font-weight="600" fill="#1a1a1a">both evict same leaf</text>
+            <line x1="46" y1="294" x2="334" y2="294" stroke="#e6e1d8"/>
+            <text x="46" y="320" font-size="12" fill="#6b6660">Agreement on the victim.</text>
+            <text x="46" y="358" font-size="11" fill="#a8462a" font-family="Geist Mono, monospace">↑ aligned correctness</text>
+
+            <!-- D -->
+            <rect x="364" y="234" width="332" height="160" rx="14" fill="#f4f1ec" stroke="#d4cec3" stroke-width="1.5"/>
+            <text x="386" y="270" font-size="34" font-weight="800" fill="#6b6660">D</text>
+            <text x="440" y="260" font-size="13" font-weight="600" fill="#1a1a1a">both retain leaf</text>
+            <line x1="386" y1="294" x2="674" y2="294" stroke="#e6e1d8"/>
+            <text x="386" y="320" font-size="12" fill="#6b6660">Agreement on keeping the block.</text>
+            <text x="386" y="358" font-size="11" fill="#a8462a" font-family="Geist Mono, monospace">↑ baseline retention</text>
+          </svg>
+        </div>
+      </div>
+      <div class="callout" style="margin-top:18px;">
+        <h3>Observed LRU failure mode</h3>
+        <p>
+          At the LRU peak-gap point, many Group B leaves are both very recent and
+          never reused again. In the current report summary, Group B for LRU has
+          median <code>time_since_last_access = 0</code>,
+          <code>time_to_next_access = ∞</code>, and
+          <code>tree_depth = 1077</code>. That is the signature of false warmth:
+          deep conversation-tail blocks that were just touched but are already dead.
+        </p>
+      </div>
+    </section>
+
+    <!-- DEPTHLRU -->
+    <section class="section" id="heuristic-motivation">
+      <div class="section-head">
+        <span class="num">07 / Heuristic</span>
+        <h2>Why DepthLRU exists</h2>
+      </div>
+      <div class="section-grid">
+        <div>
+          <p>
+            Plain LRU knows only recency. It does not distinguish between a recently
+            touched broadly shared prefix and a recently touched deep tail block
+            near the end of a conversation. In this workload, that distinction
+            matters.
+          </p>
+          <p>
+            A deep block can look extremely warm because it was touched by the
+            latest human turn, yet still be dead immediately afterward. Meanwhile, a
+            shallower prefix can look slightly older while remaining reusable across
+            later accesses.
+          </p>
+          <div class="equation">priority <span class="op">=</span> last_access_index <span class="op">−</span> α · depth</div>
+          <p style="margin-top:12px;">
+            <strong>Current design:</strong>
+            <code>α = 0.01 · page_size</code>. The reported
+            <code>page_size = 1</code> benchmark therefore uses
+            <code>α = 0.01</code>.
+          </p>
+          <div class="callout" style="margin-top:14px;">
+            <h3>Interpretation</h3>
+            <p>
+              <code>depth_lru</code> is a structural correction to recency, not a
+              new semantic signal. Under this trace construction it may also be
+              acting as a proxy for "chat tail position," which is why the
+              implementation scales the depth penalty with <code>page_size</code>
+              and why robustness beyond <code>page_size = 1</code> still matters.
+            </p>
+          </div>
+        </div>
+        <div class="svg-wrap">
+          <svg viewBox="0 0 720 440" role="img" aria-label="DepthLRU motivation diagram">
+            <rect x="0" y="0" width="720" height="440" rx="14" fill="#ffffff"/>
+            <text x="24" y="32" class="title">False warmth: deep recent leaf vs. shallower reusable prefix</text>
+
+            <!-- Left card: deep tail -->
+            <rect x="24" y="56" width="332" height="362" rx="14" fill="#f4f1ec" stroke="#d4cec3"/>
+            <text x="44" y="86" font-size="14" font-weight="700" fill="#1a1a1a">Deep tail block</text>
+            <text x="44" y="106" font-size="11" font-family="Geist Mono, monospace" fill="#6b6660">eviction-worthy</text>
+
+            <g font-family="Geist, sans-serif" font-size="12">
+              <text x="44" y="146" fill="#6b6660">last_access</text>
+              <text x="336" y="146" text-anchor="end" fill="#1a1a1a" font-weight="600">very recent</text>
+              <line x1="44" y1="156" x2="336" y2="156" stroke="#e6e1d8"/>
+
+              <text x="44" y="180" fill="#6b6660">depth</text>
+              <text x="336" y="180" text-anchor="end" fill="#1a1a1a" font-weight="600">very large</text>
+              <line x1="44" y1="190" x2="336" y2="190" stroke="#e6e1d8"/>
+
+              <text x="44" y="214" fill="#6b6660">future reuse</text>
+              <text x="336" y="214" text-anchor="end" fill="#1a1a1a" font-weight="600">none</text>
+            </g>
+
+            <!-- visual: long chain -->
+            <g transform="translate(44,250)">
+              <line x1="0" y1="14" x2="280" y2="14" stroke="#d4cec3" stroke-width="2"/>
+              <circle cx="20" cy="14" r="10" fill="#ffffff" stroke="#d4cec3" stroke-width="1.5"/>
+              <circle cx="60" cy="14" r="10" fill="#ffffff" stroke="#d4cec3" stroke-width="1.5"/>
+              <circle cx="100" cy="14" r="10" fill="#ffffff" stroke="#d4cec3" stroke-width="1.5"/>
+              <circle cx="140" cy="14" r="10" fill="#ffffff" stroke="#d4cec3" stroke-width="1.5"/>
+              <circle cx="180" cy="14" r="10" fill="#ffffff" stroke="#d4cec3" stroke-width="1.5"/>
+              <circle cx="220" cy="14" r="10" fill="#ffffff" stroke="#d4cec3" stroke-width="1.5"/>
+              <circle cx="260" cy="14" r="11" fill="#1a1a1a" stroke="#1a1a1a"/>
+              <text x="260" y="46" text-anchor="middle" font-size="10" fill="#1a1a1a" font-weight="600">recent leaf</text>
+            </g>
+
+            <text x="44" y="338" font-size="12" fill="#6b6660">LRU sees recency and protects it.</text>
+            <text x="44" y="358" font-size="12" fill="#a8462a" font-weight="600">DepthLRU subtracts α · depth.</text>
+
+            <!-- Right card: shallow shared -->
+            <rect x="364" y="56" width="332" height="362" rx="14" fill="#f6dccd" stroke="#a8462a" stroke-width="1"/>
+            <text x="384" y="86" font-size="14" font-weight="700" fill="#1a1a1a">Shared shallower prefix</text>
+            <text x="384" y="106" font-size="11" font-family="Geist Mono, monospace" fill="#853720">retain-worthy</text>
+
+            <g font-family="Geist, sans-serif" font-size="12">
+              <text x="384" y="146" fill="#2e2e2e">last_access</text>
+              <text x="676" y="146" text-anchor="end" fill="#1a1a1a" font-weight="600">slightly older</text>
+              <line x1="384" y1="156" x2="676" y2="156" stroke="#edbfa3"/>
+
+              <text x="384" y="180" fill="#2e2e2e">depth</text>
+              <text x="676" y="180" text-anchor="end" fill="#1a1a1a" font-weight="600">moderate</text>
+              <line x1="384" y1="190" x2="676" y2="190" stroke="#edbfa3"/>
+
+              <text x="384" y="214" fill="#2e2e2e">future reuse</text>
+              <text x="676" y="214" text-anchor="end" fill="#1a1a1a" font-weight="600">likely</text>
+            </g>
+
+            <!-- visual: short chain -->
+            <g transform="translate(384,250)">
+              <line x1="0" y1="14" x2="160" y2="14" stroke="#a8462a" stroke-width="2"/>
+              <circle cx="20" cy="14" r="10" fill="#ffffff" stroke="#a8462a" stroke-width="1.5"/>
+              <circle cx="60" cy="14" r="10" fill="#ffffff" stroke="#a8462a" stroke-width="1.5"/>
+              <circle cx="100" cy="14" r="11" fill="#a8462a" stroke="#a8462a"/>
+              <circle cx="140" cy="14" r="10" fill="#ffffff" stroke="#a8462a" stroke-width="1.5"/>
+              <text x="100" y="46" text-anchor="middle" font-size="10" fill="#853720" font-weight="600">shared node</text>
+            </g>
+
+            <text x="384" y="338" font-size="12" fill="#2e2e2e">LRU may evict it for looking older.</text>
+            <text x="384" y="358" font-size="12" fill="#a8462a" font-weight="600">DepthLRU keeps it competitive.</text>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <!-- RESULTS -->
+    <section class="section" id="results">
+      <div class="section-head">
+        <span class="num">08 / Results</span>
+        <h2>Current benchmark results</h2>
+      </div>
+      <div class="section-grid">
+        <div>
+          <p>
+            Fixed-block model with <code>page_size = 1</code>, the alternate Llama
+            tokenizer, interleaved ordering, and six log-spaced block budgets:
+            <code>319 · 1271 · 5061 · 20160 · 80302 · 319862</code>.
+          </p>
+          <div class="table-wrap">
+            <table class="benchmark-table">
+              <thead>
+                <tr>
+                  <th>strategy</th>
+                  <th>319</th>
+                  <th>1271</th>
+                  <th>5061</th>
+                  <th>20160</th>
+                  <th>80302</th>
+                  <th>319862</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="row-highlight"><td><code>tc_belady</code></td><td>0.0300</td><td>0.0969</td><td>0.2240</td><td>0.4339</td><td>0.6056</td><td>0.6056</td></tr>
+                <tr><td><code>lru</code></td><td>0.0072</td><td>0.0192</td><td>0.0627</td><td>0.1850</td><td>0.4543</td><td>0.6056</td></tr>
+                <tr><td><code>lfu</code></td><td>0.0049</td><td>0.0087</td><td>0.0175</td><td>0.0708</td><td>0.2604</td><td>0.6056</td></tr>
+                <tr><td><code>fifo</code></td><td>0.0072</td><td>0.0192</td><td>0.0627</td><td>0.1850</td><td>0.4543</td><td>0.6056</td></tr>
+                <tr><td><code>slru</code></td><td>0.0049</td><td>0.0087</td><td>0.0175</td><td>0.0708</td><td>0.2604</td><td>0.6056</td></tr>
+                <tr><td><code>priority</code></td><td>0.0072</td><td>0.0192</td><td>0.0627</td><td>0.1850</td><td>0.4543</td><td>0.6056</td></tr>
+                <tr class="row-highlight"><td><code>depth_lru</code></td><td>0.0075</td><td>0.0201</td><td>0.0641</td><td>0.1860</td><td>0.4565</td><td>0.6056</td></tr>
+                <tr><td><code>random</code></td><td>0.0065</td><td>0.0175</td><td>0.0533</td><td>0.1472</td><td>0.3680</td><td>0.6056</td></tr>
+                <tr><td><code>mru</code></td><td>0.0024</td><td>0.0056</td><td>0.0118</td><td>0.0393</td><td>0.1476</td><td>0.6056</td></tr>
+                <tr><td><code>filo</code></td><td>0.0024</td><td>0.0056</td><td>0.0118</td><td>0.0393</td><td>0.1476</td><td>0.6056</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <div class="callout">
+            <h3>Gap summary</h3>
+            <div class="table-wrap" style="margin-top: 8px; background: rgba(255,255,255,0.6);">
+              <table>
+                <thead>
+                  <tr><th>baseline</th><th class="numeric">peak gap</th><th class="numeric">cache size</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td><code>lru</code></td><td class="numeric">80.2%</td><td class="numeric">1271</td></tr>
+                  <tr><td><code>depth_lru</code></td><td class="numeric">79.3%</td><td class="numeric">1271</td></tr>
+                  <tr><td><code>random</code></td><td class="numeric">82.0%</td><td class="numeric">1271</td></tr>
+                  <tr><td><code>lfu</code></td><td class="numeric">92.2%</td><td class="numeric">5061</td></tr>
+                  <tr><td><code>mru</code></td><td class="numeric">94.7%</td><td class="numeric">5061</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="callout dark" style="margin-top:16px;">
+            <h3>Main read</h3>
+            <p>
+              Peak relative gap is not the whole story. At the more interpretable
+              <code>20160</code>-token budget, the constrained absolute gap is
+              <strong>0.2488</strong> token-hit-rate points for
+              <code>page_size = 1</code>. The heuristic helps, but only slightly:
+              <code>depth_lru</code> improves over <code>lru</code> at every
+              non-full cache size — yet the gain remains small.
+            </p>
+          </div>
+          <div class="mini-panel" style="margin-top:16px;">
+            <strong>Runtime.</strong>
+            Six-size sweep:
+            <code>353.70s real</code> ·
+            <code>331.60s user</code> ·
+            <code>13.15s sys</code>.
+          </div>
+        </div>
+      </div>
+      <div class="callout" style="margin-top:22px;">
+        <h3>page_size robustness check</h3>
+        <p>
+          Same trace rerun at <code>page_size = 16, 32, 64</code> using equal token
+          budgets and the policy set <code>lru / depth_lru / tc_belady</code>.
+          Result: the constrained LRU-vs-oracle gap remains large.
+        </p>
+        <div class="table-wrap" style="margin-top:10px;">
+          <table>
+            <thead>
+              <tr>
+                <th>page_size</th>
+                <th class="numeric">block budget @ 20160 tokens</th>
+                <th class="numeric">tc_belady</th>
+                <th class="numeric">lru</th>
+                <th class="numeric">absolute gap</th>
+                <th class="numeric">depth gain</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>1</code></td><td class="numeric">20160</td><td class="numeric">0.4339</td><td class="numeric">0.1850</td><td class="numeric">0.2488</td><td class="numeric">0.0010</td></tr>
+              <tr><td><code>16</code></td><td class="numeric">1260</td><td class="numeric">0.4286</td><td class="numeric">0.1779</td><td class="numeric">0.2507</td><td class="numeric">0.0020</td></tr>
+              <tr><td><code>32</code></td><td class="numeric">630</td><td class="numeric">0.4257</td><td class="numeric">0.1745</td><td class="numeric">0.2512</td><td class="numeric">0.0026</td></tr>
+              <tr><td><code>64</code></td><td class="numeric">315</td><td class="numeric">0.4206</td><td class="numeric">0.1689</td><td class="numeric">0.2516</td><td class="numeric">0.0024</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p style="margin-top:14px;">
+          The absolute LRU-vs-oracle gap at a 20160-token budget stays near 0.25
+          across page sizes 1, 16, 32, and 64. Scaling the depth penalty by
+          <code>page_size</code> recovers some effect beyond the diagnostic
+          baseline — but it still does not materially close the constrained gap.
+        </p>
+      </div>
+    </section>
+
+    <!-- FIDELITY -->
+    <section class="section" id="fidelity">
+      <div class="section-head">
+        <span class="num">09 / Fidelity</span>
+        <h2>Alignment &amp; intentional simplifications</h2>
+      </div>
+      <div class="section-grid">
+        <div>
+          <div class="callout">
+            <h3>Aligned pieces</h3>
+            <ul style="margin: 8px 0 0; padding-left: 18px; color: var(--ink-2);">
+              <li>page-aligned block semantics</li>
+              <li>radix-tree prefix matching at block boundaries</li>
+              <li>leaf-based candidate pool for eviction</li>
+              <li>priority-aware eviction rule shape</li>
+              <li>per-node recency &amp; frequency metadata</li>
+            </ul>
+          </div>
+        </div>
+        <div>
+          <div class="callout dark">
+            <h3>Explicit simplifications</h3>
+            <ul style="margin: 8px 0 0; padding-left: 18px;">
+              <li>fixed-size block model (not full allocator)</li>
+              <li>no lock-state modeling</li>
+              <li>no extra-key namespaces</li>
+              <li>no Eagle / bigram mode</li>
+              <li>report benchmark uses <code>page_size = 1</code></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <p class="footer-note" style="margin-top:20px;">
+        A precise explanation of the current repository state — not a claim that
+        every production SGLang detail has been simulated.
+      </p>
+    </section>
+
+  </div>
+</body>
+</html>

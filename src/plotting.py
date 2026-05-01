@@ -69,36 +69,68 @@ def plot_mechanism_scatter(
     strategy_name: str = "lru",
 ) -> None:
     frame = mechanism[strategy_name].copy()
-    fig, ax = plt.subplots(figsize=(7, 5.5))
+    summary = _mechanism_group_summary(frame)
+    colors = {"A": "tab:red", "B": "tab:blue", "C": "0.5", "D": "0.75"}
+    bar_colors = [colors.get(group, "0.4") for group in summary.index]
 
-    for group_name, color in [("A", "tab:red"), ("B", "tab:blue"), ("C", "0.6")]:
-        subset = frame[frame["group"] == group_name]
-        if subset.empty:
-            continue
-        ax.scatter(
-            subset["time_since_last_access"],
-            subset["time_to_next_access"],
-            label=group_name,
-            color=color,
-            alpha=0.75,
-        )
+    fig, axes = plt.subplots(2, 2, figsize=(9, 6.8))
+    fig.suptitle(f"Mechanism summary: {strategy_name}")
 
-    finite_values = frame[frame["time_to_next_access"] != float("inf")]["time_to_next_access"]
-    diagonal_max = max(
-        frame["time_since_last_access"].max() if not frame.empty else 1,
-        finite_values.max() if not finite_values.empty else 1,
+    summary["count"].plot.bar(ax=axes[0, 0], color=bar_colors)
+    axes[0, 0].set_title("Candidate records")
+    axes[0, 0].set_ylabel("count")
+    axes[0, 0].grid(axis="y", alpha=0.25)
+
+    summary["never_reuse_rate"].plot.bar(ax=axes[0, 1], color=bar_colors)
+    axes[0, 1].set_title("Never reused")
+    axes[0, 1].set_ylabel("share")
+    axes[0, 1].set_ylim(0, 1)
+    axes[0, 1].grid(axis="y", alpha=0.25)
+
+    summary[["median_time_since_last_access", "median_time_to_next_access_finite"]].plot.bar(
+        ax=axes[1, 0],
+        color=["tab:orange", "tab:green"],
     )
-    ax.plot([0, diagonal_max], [0, diagonal_max], linestyle="--", color="0.3", linewidth=1)
+    axes[1, 0].set_title("Recency vs finite future reuse")
+    axes[1, 0].set_ylabel("accesses")
+    axes[1, 0].legend(["median since last", "median to next"], fontsize=8)
+    axes[1, 0].grid(axis="y", alpha=0.25)
 
-    ax.set_xlabel("Time Since Last Access")
-    ax.set_ylabel("Time To Next Access")
-    ax.legend()
-    ax.grid(alpha=0.25)
+    summary["median_tree_depth"].plot.bar(ax=axes[1, 1], color=bar_colors)
+    axes[1, 1].set_title("Tree depth")
+    axes[1, 1].set_ylabel("median depth")
+    axes[1, 1].grid(axis="y", alpha=0.25)
+
+    for ax in axes.ravel():
+        ax.set_xlabel("group")
+        ax.tick_params(axis="x", rotation=0)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
     fig.savefig(output_path)
     plt.close(fig)
+
+
+def _mechanism_group_summary(frame: pd.DataFrame) -> pd.DataFrame:
+    summaries: list[dict[str, float | int | str]] = []
+    for group_name in ["A", "B", "C", "D"]:
+        subset = frame[frame["group"] == group_name]
+        if subset.empty:
+            continue
+
+        finite_next = subset[subset["time_to_next_access"] != float("inf")]["time_to_next_access"]
+        summaries.append(
+            {
+                "group": group_name,
+                "count": len(subset),
+                "never_reuse_rate": float((subset["time_to_next_access"] == float("inf")).mean()),
+                "median_time_since_last_access": float(subset["time_since_last_access"].median()),
+                "median_time_to_next_access_finite": float(finite_next.median()) if not finite_next.empty else 0.0,
+                "median_tree_depth": float(subset["tree_depth"].median()),
+            }
+        )
+
+    return pd.DataFrame.from_records(summaries).set_index("group")
 
 
 def _results_frame(results: dict[str, list[dict[str, float | int]]]) -> pd.DataFrame:
