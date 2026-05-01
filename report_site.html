@@ -413,16 +413,19 @@
       <div class="section-grid">
         <div>
           <p>
-            The core question is straightforward: given a realistic multi-turn chat
-            workload, how much headroom exists between common online prefix-cache
-            eviction policies and an offline upper bound that sees the future?
+            The core question is narrower than generic Belady framing: on a
+            ShareGPT-style chat trace, how large is the gap between common online
+            prefix-cache eviction policies and an upper bound under the same
+            leaf-only candidate constraint?
           </p>
           <p>
             The current repository answers that question under a deliberately clean
             model. Each cached radix node stores exactly one fixed-size block. The
             reported benchmark uses <code>page_size = 1</code>, so one block equals
-            one token for accounting, while still preserving the explicit
-            block-eviction semantics needed for a well-defined oracle.
+            one token for accounting. In plain terms, page_size = 1 is a diagnostic baseline,
+            not a production-faithful page configuration, but
+            it preserves the explicit block-eviction semantics needed for a
+            well-defined oracle.
           </p>
           <p>
             The key result is large: <code>lru</code> reaches a peak relative gap of
@@ -439,6 +442,11 @@
             report-oriented eviction study under a fixed-block, page-aligned radix
             model with a tree-constrained offline oracle and a shadow-oracle
             mechanism analysis.
+          </p>
+          <p>
+            The safe reading is: this page measures an upper bound under the same leaf-only candidate constraint,
+            not an unconstrained global optimum for
+            prefix caching in production.
           </p>
           <div class="equation">relative_gap = (tc_belady - baseline) / tc_belady</div>
         </aside>
@@ -471,6 +479,11 @@
             <code>NousResearch/Meta-Llama-3-8B-Alternate-Tokenizer</code>. The
             serialized trace remains token-level. Blocking is applied later inside the
             simulator.
+          </div>
+          <div class="mini-panel" style="margin-top:12px;">
+            <strong>Arrival model.</strong>
+            The interleaving order is random with seed 0. This is a modeling choice,
+            not a measured production arrival schedule.
           </div>
         </div>
         <div class="svg-wrap">
@@ -653,6 +666,11 @@
             the same candidate pool at each eviction event. The oracle evicts the leaf
             block whose block-aligned prefix is reused farthest in the future.
           </p>
+          <p>
+            In report terms, this is an upper bound under the same leaf-only candidate
+            constraint. It does not measure a broader optimum that could restructure
+            the tree or release non-leaf state early.
+          </p>
           <div class="equation">victim = argmax_leaf next_access(prefix)</div>
           <p>
             This fixed-block design is what made the oracle clean. Earlier
@@ -778,6 +796,7 @@
             later accesses.
           </p>
           <div class="equation">last_access_index - alpha * depth</div>
+          <p><strong>Current setting:</strong> <code>alpha = 0.01</code>.</p>
           <p>
             The heuristic does not try to predict the future directly. It only
             penalizes depth so that recently touched deep leaves compete against
@@ -788,9 +807,9 @@
             <h3>Interpretation</h3>
             <p>
               <code>depth_lru</code> is a structural correction to recency, not a
-              new semantic signal. It is motivated by the observation that the
-              missing information in LRU is partly about where a leaf sits in the
-              evolving prompt tree.
+              new semantic signal. Under this trace construction it may also be acting
+              as a proxy for "chat tail position," which is why robustness beyond
+              <code>page_size = 1</code> matters.
             </p>
           </div>
         </div>
@@ -884,11 +903,12 @@
           <div class="callout blue" style="margin-top:16px;">
             <h3>Main Read</h3>
             <p>
-              The heuristic helps, but only slightly. <code>depth_lru</code> improves
-              over <code>lru</code> at every non-full cache size, yet the peak gap
-              only moves from <strong>80.2%</strong> to <strong>79.3%</strong>. That
-              means depth captures part of the failure mode, but not enough to close
-              the gap materially.
+              Peak relative gap is not the whole story. At the more interpretable
+              <code>20160</code>-token budget, the constrained absolute gap is
+              <strong>0.2488</strong> token-hit-rate points for <code>page_size = 1</code>.
+              The heuristic helps, but only slightly: <code>depth_lru</code> improves
+              over <code>lru</code> at every non-full cache size in the diagnostic
+              baseline, yet the gain remains small.
             </p>
           </div>
           <div class="mini-panel" style="margin-top:16px;">
@@ -898,6 +918,44 @@
             <code>13.15s sys</code>.
           </div>
         </div>
+      </div>
+      <div class="callout" style="margin-top:18px;">
+        <h3>page_size robustness check</h3>
+        <p>
+          To test whether the main conclusion survives beyond the degenerate block
+          regime, the same trace was rerun at <code>page_size = 16, 32, 64</code>
+          using equal token budgets and the policy set
+          <code>lru / depth_lru / tc_belady</code>.
+        </p>
+        <p>
+          Result: the constrained LRU-vs-oracle gap remains large, but the heuristic
+          mostly disappears once depth is measured in coarser block units. In other
+          words, the gap is robust, but the current <code>depth_lru</code> parameterization
+          is not.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>page_size</th>
+              <th class="numeric">block budget @ 20160 tokens</th>
+              <th class="numeric">tc_belady</th>
+              <th class="numeric">lru</th>
+              <th class="numeric">absolute gap</th>
+              <th class="numeric">depth gain</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>1</code></td><td class="numeric">20160</td><td class="numeric">0.4339</td><td class="numeric">0.1850</td><td class="numeric">0.2488</td><td class="numeric">0.0010</td></tr>
+            <tr><td><code>16</code></td><td class="numeric">1260</td><td class="numeric">0.4286</td><td class="numeric">0.1779</td><td class="numeric">0.2507</td><td class="numeric">0.0002</td></tr>
+            <tr><td><code>32</code></td><td class="numeric">630</td><td class="numeric">0.4257</td><td class="numeric">0.1745</td><td class="numeric">0.2512</td><td class="numeric">0.0000</td></tr>
+            <tr><td><code>64</code></td><td class="numeric">315</td><td class="numeric">0.4206</td><td class="numeric">0.1689</td><td class="numeric">0.2516</td><td class="numeric">0.0000</td></tr>
+          </tbody>
+        </table>
+        <p>
+          Put plainly: the absolute lru-vs-oracle gap at a 20160-token budget stays near 0.25
+          across page sizes 1, 16, 32, and 64, while the current depth heuristic loses
+          almost all of its effect once page size increases.
+        </p>
       </div>
     </section>
 

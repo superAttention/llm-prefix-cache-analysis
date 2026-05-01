@@ -4,7 +4,7 @@ Date: 2026-04-30
 ## Setup
 - Dataset: cached local snapshot of `anon8231489123/ShareGPT_Vicuna_unfiltered`
 - Tokenizer: `NousResearch/Meta-Llama-3-8B-Alternate-Tokenizer`
-- Ordering: interleaved
+- Ordering: interleaved, random with seed `0`
 - Cache model: fixed-size block radix tree
 - Page size: `1` token per block
 - Eviction unit: one leaf block
@@ -57,6 +57,31 @@ Using `(tc_belady - baseline) / tc_belady` on token hit rate:
 | `mru` | 94.7% | 5061 |
 | `filo` | 94.7% | 5061 |
 
+## Conservative Read
+
+- `tc_belady` should be read as the upper bound under the same leaf-only candidate constraint, not as an unconstrained global optimum for prefix caching.
+- Peak relative gap is not the only useful summary. At the `20160`-token budget, the `lru` absolute gap is `0.2488` token-hit-rate points and the relative gap is `57.4%`.
+
+## Page-Size Robustness
+
+The same trace was rerun at `page_size = 16, 32, 64` using equal token budgets and the policy set `lru / depth_lru / tc_belady`.
+
+Artifact:
+- `cache/page-size-sweep-llama-alt-robustness.pkl`
+
+At a `20160`-token budget:
+
+| page_size | block budget | tc_belady | lru | absolute gap | depth gain |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `1` | 20160 | 0.4339 | 0.1850 | 0.2488 | 0.0010 |
+| `16` | 1260 | 0.4286 | 0.1779 | 0.2507 | 0.0002 |
+| `32` | 630 | 0.4257 | 0.1745 | 0.2512 | 0.0000 |
+| `64` | 315 | 0.4206 | 0.1689 | 0.2516 | 0.0000 |
+
+Takeaway:
+- The constrained `lru`-vs-`tc_belady` gap persists at non-degenerate page sizes.
+- The current `depth_lru` heuristic does not: with coarser page sizes, it becomes effectively identical to `lru`.
+
 ## Notes
 - `tc_belady` dominates every online policy at every reported cache size under the fixed-block model.
 - `depth_lru` is consistently but only slightly better than plain `lru`; it does not materially close the gap.
@@ -65,3 +90,4 @@ Using `(tc_belady - baseline) / tc_belady` on token hit rate:
 - `lfu` and `slru` are numerically identical on this trace.
 - `mru` and `filo` are numerically identical on this trace.
 - Full-cache convergence occurs at `319,862` blocks, which matches the unique-block-prefix count for this trace.
+- `page_size = 1` is a diagnostic baseline. It isolates the leaf-only model cleanly, but it is not by itself enough to claim production-like page behavior.

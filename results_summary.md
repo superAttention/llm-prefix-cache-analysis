@@ -6,7 +6,7 @@ Date: 2026-04-30
 - Tokenizer: `NousResearch/Meta-Llama-3-8B-Alternate-Tokenizer`
 - Conversations: `300`
 - Accesses: `978`
-- Ordering: interleaved
+- Ordering: interleaved, random with seed `0`
 - Cache model: fixed-size block radix tree
 - Page size: `1` token per block
 - Capacity accounting: blocks
@@ -34,7 +34,9 @@ filo            0.0024    0.0056    0.0118    0.0393    0.1476    0.6056
 ## `tc_belady` Gap Highlights
 
 - `tc_belady` dominates every online policy at every reported cache size.
+- The safe interpretation is: `tc_belady` is the upper bound under the same leaf-only candidate constraint, not an unconstrained global optimum.
 - `lru` peak relative gap: `80.2%` at `1271` blocks.
+- At the more interpretable `20160`-token budget, the absolute `lru` gap is `0.2488` token-hit-rate points and the relative gap is `57.4%`.
 - `depth_lru` peak relative gap: `79.3%` at `1271` blocks.
 - `random` peak relative gap: `82.0%` at `1271` blocks.
 - `lfu` and `slru` peak relative gap: `92.2%` at `5061` blocks.
@@ -68,9 +70,11 @@ Interpretation:
 - The main `lru` failure mode still looks like false warmth under the fixed-block model.
 - Group B leaves were just accessed, so LRU protects them, but many are never reused again.
 - Those false-warm leaves are also much deeper than the leaves both policies retain, which means they are typically conversation-tail blocks rather than broadly shared prefixes.
+- That said, depth here is entangled with the trace construction itself: deeper leaves are often simply closer to the end of a chat, so this is diagnostic evidence, not a general causal proof.
 
 ## Heuristic Check (`depth_lru`)
 
+- Current parameter: `alpha = 0.01`
 - `depth_lru` is slightly better than `lru` at every non-full cache size, but the improvement is small.
 - Peak relative gap only moves from `80.2%` to `79.3%`.
 
@@ -91,6 +95,26 @@ Interpretation:
 - But it mostly trades that error for a nearby variant: shallower stale blocks with no future reuse still survive often enough that the overall gain is marginal.
 - The underlying problem remains missing conversation-lifecycle information, not just missing depth information.
 
+## Page-Size Robustness
+
+To test whether the main gap survives beyond the degenerate `page_size = 1` regime, the same trace was rerun at `page_size = 16, 32, 64` using equal token budgets and the strategy set `lru / depth_lru / tc_belady`.
+
+Artifact:
+- `cache/page-size-sweep-llama-alt-robustness.pkl`
+
+At a `20160`-token budget:
+
+| page_size | block budget | tc_belady | lru | absolute gap | depth gain |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `1` | 20160 | 0.4339 | 0.1850 | 0.2488 | 0.0010 |
+| `16` | 1260 | 0.4286 | 0.1779 | 0.2507 | 0.0002 |
+| `32` | 630 | 0.4257 | 0.1745 | 0.2512 | 0.0000 |
+| `64` | 315 | 0.4206 | 0.1689 | 0.2516 | 0.0000 |
+
+Takeaway:
+- The constrained `lru`-vs-`tc_belady` gap is robust across non-degenerate page sizes.
+- The current `depth_lru` parameterization is not robust: once depth is measured in coarser block units, the heuristic becomes effectively indistinguishable from `lru`.
+
 ## Runtime
 - Benchmark command used six log-spaced cache sizes:
   `319 1271 5061 20160 80302 319862`
@@ -104,3 +128,4 @@ Interpretation:
 ## Notes
 - This summary intentionally replaces the earlier `100`-conversation and `distilgpt2` notes. Those numbers came from the pre-redesign compressed-leaf simulator and are no longer the current model.
 - Under `page_size=1`, the fixed-block model still uses token-aligned prefixes, but the eviction unit and cache budget are now explicit block objects rather than compressed variable-length leaf segments.
+- `page_size = 1` should be read as a diagnostic baseline, not as a production-faithful block size.

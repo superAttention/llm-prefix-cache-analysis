@@ -31,6 +31,12 @@ def test_report_site_contains_required_technical_sections_and_facts():
         "last_access_index - alpha * depth",
         "priority reduces to plain lru",
         "|A| == |B| == number of disagreement events",
+        "upper bound under the same leaf-only candidate constraint",
+        "interleaving order is random with seed 0",
+        "alpha = 0.01",
+        "page_size = 1 is a diagnostic baseline",
+        "page_size robustness check",
+        "the absolute lru-vs-oracle gap at a 20160-token budget stays near 0.25",
     ]
 
     for fragment in required_fragments:
