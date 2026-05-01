@@ -929,10 +929,10 @@
           <code>lru / depth_lru / tc_belady</code>.
         </p>
         <p>
-          Result: the constrained LRU-vs-oracle gap remains large. A fixed-<code>alpha</code>
-          DepthLRU mostly disappears once depth is measured in coarser block units,
-          which is why the implementation now scales <code>alpha</code> with
-          <code>page_size</code> by design.
+          Result: the constrained LRU-vs-oracle gap remains large. With the current
+          design, <code>alpha</code> scales with <code>page_size</code>, which
+          recovers some heuristic signal at larger block sizes, but the gain remains
+          small relative to the oracle gap.
         </p>
         <table>
           <thead>
@@ -947,15 +947,16 @@
           </thead>
           <tbody>
             <tr><td><code>1</code></td><td class="numeric">20160</td><td class="numeric">0.4339</td><td class="numeric">0.1850</td><td class="numeric">0.2488</td><td class="numeric">0.0010</td></tr>
-            <tr><td><code>16</code></td><td class="numeric">1260</td><td class="numeric">0.4286</td><td class="numeric">0.1779</td><td class="numeric">0.2507</td><td class="numeric">0.0002</td></tr>
-            <tr><td><code>32</code></td><td class="numeric">630</td><td class="numeric">0.4257</td><td class="numeric">0.1745</td><td class="numeric">0.2512</td><td class="numeric">0.0000</td></tr>
-            <tr><td><code>64</code></td><td class="numeric">315</td><td class="numeric">0.4206</td><td class="numeric">0.1689</td><td class="numeric">0.2516</td><td class="numeric">0.0000</td></tr>
+            <tr><td><code>16</code></td><td class="numeric">1260</td><td class="numeric">0.4286</td><td class="numeric">0.1779</td><td class="numeric">0.2507</td><td class="numeric">0.0020</td></tr>
+            <tr><td><code>32</code></td><td class="numeric">630</td><td class="numeric">0.4257</td><td class="numeric">0.1745</td><td class="numeric">0.2512</td><td class="numeric">0.0026</td></tr>
+            <tr><td><code>64</code></td><td class="numeric">315</td><td class="numeric">0.4206</td><td class="numeric">0.1689</td><td class="numeric">0.2516</td><td class="numeric">0.0024</td></tr>
           </tbody>
         </table>
         <p>
           Put plainly: the absolute lru-vs-oracle gap at a 20160-token budget stays near 0.25
-          across page sizes 1, 16, 32, and 64, while the current depth heuristic loses
-          almost all of its effect once page size increases.
+          across page sizes 1, 16, 32, and 64. Scaling the depth penalty by
+          <code>page_size</code> recovers some effect beyond the diagnostic baseline,
+          but it still does not materially close the constrained gap.
         </p>
       </div>
     </section>

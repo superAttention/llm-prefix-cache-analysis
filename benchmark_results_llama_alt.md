@@ -68,20 +68,20 @@ Using `(tc_belady - baseline) / tc_belady` on token hit rate:
 The same trace was rerun at `page_size = 16, 32, 64` using equal token budgets and the policy set `lru / depth_lru / tc_belady`.
 
 Artifact:
-- `cache/page-size-sweep-llama-alt-robustness.pkl`
+- `cache/page-size-sweep-llama-alt-alpha-scaled-16-64.pkl`
 
 At a `20160`-token budget:
 
 | page_size | block budget | tc_belady | lru | absolute gap | depth gain |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `1` | 20160 | 0.4339 | 0.1850 | 0.2488 | 0.0010 |
-| `16` | 1260 | 0.4286 | 0.1779 | 0.2507 | 0.0002 |
-| `32` | 630 | 0.4257 | 0.1745 | 0.2512 | 0.0000 |
-| `64` | 315 | 0.4206 | 0.1689 | 0.2516 | 0.0000 |
+| `16` | 1260 | 0.4286 | 0.1779 | 0.2507 | 0.0020 |
+| `32` | 630 | 0.4257 | 0.1745 | 0.2512 | 0.0026 |
+| `64` | 315 | 0.4206 | 0.1689 | 0.2516 | 0.0024 |
 
 Takeaway:
 - The constrained `lru`-vs-`tc_belady` gap persists at non-degenerate page sizes.
-- A fixed-`alpha` DepthLRU does not: with coarser page sizes, it becomes effectively identical to `lru`, which is why the implementation now scales `alpha` with `page_size` by design.
+- Scaling `alpha` with `page_size` recovers some heuristic signal at larger block sizes, but the gain remains small relative to the constrained oracle gap.
 
 ## Notes
 - `tc_belady` dominates every online policy at every reported cache size under the fixed-block model.

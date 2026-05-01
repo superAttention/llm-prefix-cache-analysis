@@ -101,20 +101,21 @@ Interpretation:
 To test whether the main gap survives beyond the degenerate `page_size = 1` regime, the same trace was rerun at `page_size = 16, 32, 64` using equal token budgets and the strategy set `lru / depth_lru / tc_belady`.
 
 Artifact:
-- `cache/page-size-sweep-llama-alt-robustness.pkl`
+- `cache/page-size-sweep-llama-alt-alpha-scaled-16-64.pkl`
 
 At a `20160`-token budget:
 
 | page_size | block budget | tc_belady | lru | absolute gap | depth gain |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `1` | 20160 | 0.4339 | 0.1850 | 0.2488 | 0.0010 |
-| `16` | 1260 | 0.4286 | 0.1779 | 0.2507 | 0.0002 |
-| `32` | 630 | 0.4257 | 0.1745 | 0.2512 | 0.0000 |
-| `64` | 315 | 0.4206 | 0.1689 | 0.2516 | 0.0000 |
+| `16` | 1260 | 0.4286 | 0.1779 | 0.2507 | 0.0020 |
+| `32` | 630 | 0.4257 | 0.1745 | 0.2512 | 0.0026 |
+| `64` | 315 | 0.4206 | 0.1689 | 0.2516 | 0.0024 |
 
 Takeaway:
 - The constrained `lru`-vs-`tc_belady` gap is robust across non-degenerate page sizes.
-- A fixed-`alpha` DepthLRU was not robust, which is why the implementation now scales `alpha` with `page_size` by design.
+- Scaling `alpha` with `page_size` recovers some of the lost heuristic effect, but the gain remains small relative to the oracle gap.
+- So the current default `depth_lru` is more defensible dimensionally, yet still far from closing the constrained gap.
 
 ## Runtime
 - Benchmark command used six log-spaced cache sizes:
