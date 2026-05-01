@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import time
 from typing import Callable
 
 from src.belady import TreeConstrainedBelady
@@ -58,17 +59,43 @@ def run_suite(
     strategy_names: list[str] | None = None,
     seed: int = 0,
     page_size: int = 1,
+    progress_callback: Callable[[str, int, int, int], None] | None = None,
+    request_progress_callback: Callable[[str, int, int, int], None] | None = None,
+    progress_interval_seconds: float = 5.0,
 ) -> dict[str, list[dict[str, float | int]]]:
     registry = build_strategy_registry(seed=seed, page_size=page_size)
     selected_names = strategy_names or list(registry)
+    total_unique_blocks = count_unique_blocks(trace, page_size)
+    full_cache_hits: list[int] | None = None
 
     results: dict[str, list[dict[str, float | int]]] = {}
     for strategy_name in selected_names:
         factory = registry[strategy_name]
         points: list[dict[str, float | int]] = []
 
-        for cache_size in cache_sizes:
-            hit_tokens = run_strategy(trace, factory(cache_size))
+        for point_index, cache_size in enumerate(cache_sizes, start=1):
+            if progress_callback is not None:
+                progress_callback(strategy_name, cache_size, point_index, len(cache_sizes))
+            if cache_size >= total_unique_blocks:
+                if full_cache_hits is None:
+                    full_cache_hits = no_eviction_hit_tokens(trace, page_size)
+                hit_tokens = full_cache_hits
+            else:
+                hit_tokens = run_strategy(
+                    trace,
+                    factory(cache_size),
+                    progress_callback=(
+                        None
+                        if request_progress_callback is None
+                        else lambda completed, total, name=strategy_name, size=cache_size: request_progress_callback(
+                            name,
+                            size,
+                            completed,
+                            total,
+                        )
+                    ),
+                    progress_interval_seconds=progress_interval_seconds,
+                )
             point = SimulationPoint(
                 cache_size=cache_size,
                 token_hit_rate=token_hit_rate(trace, hit_tokens),
@@ -81,14 +108,53 @@ def run_suite(
     return results
 
 
-def run_strategy(trace: list[list[int]], simulator: object) -> list[int]:
+def count_unique_blocks(trace: list[list[int]], page_size: int) -> int:
+    return len({prefix for access in trace for prefix in iter_block_prefixes(access, page_size)})
+
+
+def no_eviction_hit_tokens(trace: list[list[int]], page_size: int) -> list[int]:
+    cached_prefixes: set[tuple[int, ...]] = set()
+    hit_tokens: list[int] = []
+
+    for tokens in trace:
+        access_hit_tokens = 0
+        access_prefixes = list(iter_block_prefixes(tokens, page_size))
+        for prefix in access_prefixes:
+            if prefix not in cached_prefixes:
+                break
+            access_hit_tokens = len(prefix)
+
+        cached_prefixes.update(access_prefixes)
+        hit_tokens.append(access_hit_tokens)
+
+    return hit_tokens
+
+
+def run_strategy(
+    trace: list[list[int]],
+    simulator: object,
+    progress_callback: Callable[[int, int], None] | None = None,
+    progress_interval_seconds: float = 5.0,
+) -> list[int]:
     if isinstance(simulator, TreeConstrainedBelady):
-        return simulator.simulate(trace).hit_tokens
+        return simulator.simulate(
+            trace,
+            progress_callback=progress_callback,
+            progress_interval_seconds=progress_interval_seconds,
+        ).hit_tokens
 
     hit_tokens: list[int] = []
+    total_accesses = len(trace)
+    next_progress_at = time.monotonic() + progress_interval_seconds
     for access_index, tokens in enumerate(trace):
         result = simulator.access(tokens, access_index=access_index)
         hit_tokens.append(result.hit_tokens)
+        if progress_callback is not None:
+            now = time.monotonic()
+            completed = access_index + 1
+            if progress_interval_seconds <= 0 or completed == total_accesses or now >= next_progress_at:
+                progress_callback(completed, total_accesses)
+                next_progress_at = now + progress_interval_seconds
     return hit_tokens
 
 
@@ -99,8 +165,7 @@ def derive_cache_sizes(
     max_fraction: float = 1.0,
     page_size: int = 1,
 ) -> list[int]:
-    unique_blocks = {prefix for access in trace for prefix in iter_block_prefixes(access, page_size)}
-    total_unique_blocks = max(1, len(unique_blocks))
+    total_unique_blocks = max(1, count_unique_blocks(trace, page_size))
     min_size = max(1, math.floor(total_unique_blocks * min_fraction))
     max_size = max(min_size, math.ceil(total_unique_blocks * max_fraction))
 

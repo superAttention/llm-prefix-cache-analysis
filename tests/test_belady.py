@@ -23,3 +23,17 @@ def test_tree_constrained_belady_respects_page_boundaries_for_partial_tail_block
     belady_results = belady.simulate(trace)
 
     assert belady_results.hit_tokens == [0, 2, 3]
+
+
+def test_tree_constrained_belady_reports_request_progress():
+    trace = [[1, 2], [3, 4], [1, 2]]
+    belady = TreeConstrainedBelady(block_budget=1, page_size=2)
+    events = []
+
+    belady.simulate(
+        trace,
+        progress_callback=lambda completed, total: events.append((completed, total)),
+        progress_interval_seconds=0,
+    )
+
+    assert events == [(1, 3), (2, 3), (3, 3)]
