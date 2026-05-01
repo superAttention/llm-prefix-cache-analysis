@@ -23,6 +23,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--sizes", nargs="+", type=int, help="Explicit cache sizes to sweep.")
     parser.add_argument("--n-sizes", type=int, default=8, help="Number of derived logarithmic cache sizes.")
+    parser.add_argument("--page-size", type=int, default=1, help="Number of tokens per cached block.")
     parser.add_argument("--seed", type=int, default=0, help="Seed for randomized strategies.")
     return parser.parse_args()
 
@@ -35,12 +36,13 @@ def main() -> None:
     with trace_path.open("rb") as handle:
         trace = pickle.load(handle)
 
-    cache_sizes = args.sizes or derive_cache_sizes(trace, n_sizes=args.n_sizes)
+    cache_sizes = args.sizes or derive_cache_sizes(trace, n_sizes=args.n_sizes, page_size=args.page_size)
     results = run_suite(
         trace=trace,
         cache_sizes=cache_sizes,
         strategy_names=args.strategies,
         seed=args.seed,
+        page_size=args.page_size,
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

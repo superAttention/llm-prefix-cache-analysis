@@ -49,6 +49,35 @@ class Priority(EvictionStrategy):
         return (node.priority, node.last_access_index)
 
 
+class DepthLRU(EvictionStrategy):
+    """LRU penalized by tree depth.
+
+    Problem: LRU keeps deep nodes because they look recently accessed ("false warmth"),
+    but deep nodes are conversation tails that won't be reused. Shallow nodes are shared
+    prefixes that LRU wrongly evicts because they look slightly stale.
+
+    Fix: subtract a depth penalty from last_access_index so deep recently-accessed nodes
+    compete with old nodes rather than always surviving.
+
+    priority = last_access_index - alpha * tree_depth
+    Lower = evict first. alpha controls how much depth overrides recency.
+
+    Empirical reference points (from mechanism analysis):
+      Group B (false warmth):  last_access_index ≈ current,  tree_depth median 664
+      Group D (correctly warm): last_access_index ≈ current, tree_depth median 273
+      Group A (wrongly evicted): last_access_index ≈ current-1, tree_depth median 145
+      Group C (correctly evicted): last_access_index ≈ current, tree_depth median 654
+
+    For alpha > 1/509 ≈ 0.002, shallow warm A nodes (depth=145, age=1) outscore
+    deep dead C nodes (depth=654, age=0), reversing LRU's mistake.
+    """
+
+    def __init__(self, alpha: float = 0.01) -> None:
+        self.alpha = alpha
+
+    def get_priority(self, node) -> float:
+        return node.last_access_index - self.alpha * node.depth
+
 class Random(EvictionStrategy):
     def __init__(self, seed: int | None = None) -> None:
         self._random = random.Random(seed)

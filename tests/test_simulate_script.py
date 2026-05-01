@@ -26,6 +26,8 @@ def test_simulate_script_writes_results_pickle(tmp_path: Path):
             "--sizes",
             "2",
             "3",
+            "--page-size",
+            "2",
         ],
         check=False,
         capture_output=True,

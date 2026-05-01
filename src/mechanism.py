@@ -6,6 +6,7 @@ from math import inf
 import pandas as pd
 
 from src.metrics import relative_gap
+from src.paging import iter_block_prefixes
 from src.simulate import build_strategy_registry
 from src.radix_tree import RadixTree
 
@@ -39,26 +40,28 @@ def analyze_against_belady(
     strategy_name: str = "lru",
     near_window_multiplier: int = 10,
     seed: int = 0,
+    page_size: int = 1,
 ) -> pd.DataFrame:
     """Shadow-oracle approach: run one strategy simulation; at each eviction
     ask what TC-Belady would have chosen from the identical candidate pool.
 
-    This avoids the tree-divergence problem of running two separate simulations:
-    every eviction event produces exactly one Group A node (strategy evicted,
-    Belady would not) and one Group B node (Belady would evict, strategy did
-    not), both drawn from the same tree state at the same moment.
+    This avoids the tree-divergence problem of running two separate simulations.
+    On disagreement events, the shared candidate pool produces exactly one Group
+    A node (strategy evicted, Belady would not) and one Group B node (Belady
+    would evict, strategy did not), both drawn from the same tree state at the
+    same moment.
     """
-    registry = build_strategy_registry(seed=seed)
+    registry = build_strategy_registry(seed=seed, page_size=page_size)
     simulator = registry[strategy_name](cache_size)
-    access_history = _build_access_history(trace)
+    access_history = _build_access_history(trace, page_size=page_size)
     records: list[dict[str, object]] = []
 
     for access_index, tokens in enumerate(trace):
         result = simulator.lookup(tokens, access_index=access_index)
-        simulator.insert_suffix(tokens, result.hit_tokens, access_index)
+        simulator.insert_suffix(tokens, result.hit_blocks, access_index)
 
         eviction_round = 0
-        while simulator.cached_token_count > simulator.token_budget:
+        while simulator.cached_block_count > simulator.block_budget:
             leaves = simulator.iter_leaves()
             candidate_metrics = _build_candidate_metrics(
                 leaves=leaves,
@@ -105,14 +108,11 @@ def _label_group(strategy_evicted: bool, belady_evicted: bool) -> str:
     return "D"
 
 
-
-def _build_access_history(trace: list[list[int]]) -> dict[tuple[int, ...], list[int]]:
+def _build_access_history(trace: list[list[int]], page_size: int) -> dict[tuple[int, ...], list[int]]:
     history: dict[tuple[int, ...], list[int]] = {}
     for access_index, tokens in enumerate(trace):
-        prefix: list[int] = []
-        for token in tokens:
-            prefix.append(token)
-            history.setdefault(tuple(prefix), []).append(access_index)
+        for prefix in iter_block_prefixes(tokens, page_size):
+            history.setdefault(prefix, []).append(access_index)
     return history
 
 
@@ -132,7 +132,7 @@ def _build_candidate_metrics(
             "reuse_count_total": _reuse_count_total(node.prefix, access_history, access_index),
             "time_since_last_access": access_index - node.last_access_index,
             "time_to_next_access": _time_to_next_access(node.prefix, access_history, access_index),
-            "tree_depth": len(node.prefix),
+            "tree_depth": node.depth,
             "subtree_size": _subtree_leaf_count(node),
             "is_leaf": node.is_leaf,
             "token_length": node.token_length,

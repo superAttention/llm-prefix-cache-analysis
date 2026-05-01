@@ -24,6 +24,7 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         help="Strategies to analyze against TC-Belady. Defaults to all tree-based online strategies in the results.",
     )
+    parser.add_argument("--page-size", type=int, default=1, help="Number of tokens per cached block.")
     parser.add_argument("--near-window-multiplier", type=int, default=10)
     parser.add_argument("--seed", type=int, default=0)
     return parser.parse_args()
@@ -41,9 +42,7 @@ def main() -> None:
         raise ValueError("Mechanism analysis requires a trace. Pass --trace or bundle it with the results payload.")
 
     cache_size = args.cache_size or select_peak_gap_cache_size(results, baseline_name=args.baseline)
-    strategies = args.strategies or [
-        name for name in results if name not in {"tc_belady", "naive_lru"}
-    ]
+    strategies = args.strategies or [name for name in results if name != "tc_belady"]
 
     mechanism = {
         strategy_name: analyze_against_belady(
@@ -52,6 +51,7 @@ def main() -> None:
             strategy_name=strategy_name,
             near_window_multiplier=args.near_window_multiplier,
             seed=args.seed,
+            page_size=args.page_size,
         )
         for strategy_name in strategies
     }

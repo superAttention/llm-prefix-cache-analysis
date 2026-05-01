@@ -5,9 +5,9 @@ import math
 from typing import Callable
 
 from src.belady import TreeConstrainedBelady
-from src.eviction import FIFO, FILO, LFU, LRU, MRU, Priority, Random, SLRU
-from src.lru_naive import NaiveLRU
+from src.eviction import FIFO, FILO, LFU, LRU, MRU, Priority, Random, SLRU, DepthLRU
 from src.metrics import request_hit_rate, token_hit_rate
+from src.paging import iter_block_prefixes
 from src.radix_tree import RadixTree
 
 
@@ -28,18 +28,26 @@ class SimulationPoint:
 StrategyFactory = Callable[[int], object]
 
 
-def build_strategy_registry(seed: int = 0) -> dict[str, StrategyFactory]:
+def build_strategy_registry(seed: int = 0, page_size: int = 1) -> dict[str, StrategyFactory]:
     return {
-        "lru": lambda budget: RadixTree(token_budget=budget, eviction_strategy=LRU()),
-        "lfu": lambda budget: RadixTree(token_budget=budget, eviction_strategy=LFU()),
-        "fifo": lambda budget: RadixTree(token_budget=budget, eviction_strategy=FIFO()),
-        "mru": lambda budget: RadixTree(token_budget=budget, eviction_strategy=MRU()),
-        "filo": lambda budget: RadixTree(token_budget=budget, eviction_strategy=FILO()),
-        "slru": lambda budget: RadixTree(token_budget=budget, eviction_strategy=SLRU()),
-        "priority": lambda budget: RadixTree(token_budget=budget, eviction_strategy=Priority()),
-        "random": lambda budget: RadixTree(token_budget=budget, eviction_strategy=Random(seed=seed)),
-        "naive_lru": lambda budget: NaiveLRU(token_budget=budget),
-        "tc_belady": lambda budget: TreeConstrainedBelady(token_budget=budget),
+        "lru": lambda budget: RadixTree(block_budget=budget, eviction_strategy=LRU(), page_size=page_size),
+        "lfu": lambda budget: RadixTree(block_budget=budget, eviction_strategy=LFU(), page_size=page_size),
+        "fifo": lambda budget: RadixTree(block_budget=budget, eviction_strategy=FIFO(), page_size=page_size),
+        "mru": lambda budget: RadixTree(block_budget=budget, eviction_strategy=MRU(), page_size=page_size),
+        "filo": lambda budget: RadixTree(block_budget=budget, eviction_strategy=FILO(), page_size=page_size),
+        "slru": lambda budget: RadixTree(block_budget=budget, eviction_strategy=SLRU(), page_size=page_size),
+        "priority": lambda budget: RadixTree(block_budget=budget, eviction_strategy=Priority(), page_size=page_size),
+        "random": lambda budget: RadixTree(
+            block_budget=budget,
+            eviction_strategy=Random(seed=seed),
+            page_size=page_size,
+        ),
+        "depth_lru": lambda budget: RadixTree(
+            block_budget=budget,
+            eviction_strategy=DepthLRU(),
+            page_size=page_size,
+        ),
+        "tc_belady": lambda budget: TreeConstrainedBelady(block_budget=budget, page_size=page_size),
     }
 
 
@@ -48,8 +56,9 @@ def run_suite(
     cache_sizes: list[int],
     strategy_names: list[str] | None = None,
     seed: int = 0,
+    page_size: int = 1,
 ) -> dict[str, list[dict[str, float | int]]]:
-    registry = build_strategy_registry(seed=seed)
+    registry = build_strategy_registry(seed=seed, page_size=page_size)
     selected_names = strategy_names or list(registry)
 
     results: dict[str, list[dict[str, float | int]]] = {}
@@ -87,11 +96,12 @@ def derive_cache_sizes(
     n_sizes: int = 8,
     min_fraction: float = 0.001,
     max_fraction: float = 1.0,
+    page_size: int = 1,
 ) -> list[int]:
-    unique_prefixes = {tuple(access[:index]) for access in trace for index in range(1, len(access) + 1)}
-    total_unique_tokens = max(1, len(unique_prefixes))
-    min_size = max(1, math.floor(total_unique_tokens * min_fraction))
-    max_size = max(min_size, math.ceil(total_unique_tokens * max_fraction))
+    unique_blocks = {prefix for access in trace for prefix in iter_block_prefixes(access, page_size)}
+    total_unique_blocks = max(1, len(unique_blocks))
+    min_size = max(1, math.floor(total_unique_blocks * min_fraction))
+    max_size = max(min_size, math.ceil(total_unique_blocks * max_fraction))
 
     if n_sizes <= 1 or min_size == max_size:
         return [max_size]

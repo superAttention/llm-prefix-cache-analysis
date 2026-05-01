@@ -3,6 +3,7 @@ from __future__ import annotations
 from bisect import bisect_right
 from dataclasses import dataclass
 
+from src.paging import iter_block_prefixes
 from src.radix_tree import RadixTree, TreeNode
 
 
@@ -17,17 +18,30 @@ class _NoOpStrategy:
 
 
 class TreeConstrainedBelady:
-    def __init__(self, token_budget: int) -> None:
-        self.token_budget = token_budget
+    """Offline optimal under the simplified fixed-block radix model.
+
+    The cache is budgeted in blocks, each node stores exactly one page-sized
+    block, and eviction removes one leaf block at a time. This keeps the
+    oracle well-defined: evict the leaf block whose block-aligned prefix is
+    used farthest in the future.
+    """
+
+    def __init__(self, block_budget: int, page_size: int = 1) -> None:
+        self.block_budget = block_budget
+        self.page_size = page_size
 
     def simulate(self, trace: list[list[int]]) -> SimulationResult:
         access_history = self._build_access_history(trace)
-        tree = RadixTree(token_budget=self.token_budget, eviction_strategy=_NoOpStrategy())
+        tree = RadixTree(
+            block_budget=self.block_budget,
+            eviction_strategy=_NoOpStrategy(),
+            page_size=self.page_size,
+        )
         hit_tokens: list[int] = []
 
         for access_index, tokens in enumerate(trace):
             result = tree.lookup(tokens, access_index=access_index)
-            tree.insert_suffix(tokens, result.hit_tokens, access_index)
+            tree.insert_suffix(tokens, result.hit_blocks, access_index)
             self._evict_until_within_budget(tree, access_history, access_index)
             hit_tokens.append(result.hit_tokens)
 
@@ -37,10 +51,8 @@ class TreeConstrainedBelady:
         history: dict[tuple[int, ...], list[int]] = {}
 
         for access_index, tokens in enumerate(trace):
-            prefix: list[int] = []
-            for token in tokens:
-                prefix.append(token)
-                history.setdefault(tuple(prefix), []).append(access_index)
+            for prefix in iter_block_prefixes(tokens, self.page_size):
+                history.setdefault(prefix, []).append(access_index)
 
         return history
 
@@ -50,7 +62,7 @@ class TreeConstrainedBelady:
         access_history: dict[tuple[int, ...], list[int]],
         access_index: int,
     ) -> None:
-        while tree.cached_token_count > tree.token_budget:
+        while tree.cached_block_count > tree.block_budget:
             leaves = tree.iter_leaves()
             victim = max(leaves, key=lambda node: self._next_access(node, access_history, access_index))
             tree.remove_leaf(victim)
