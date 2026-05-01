@@ -34,6 +34,7 @@ Date: 2026-04-30
 | `fifo` | 0.0072 | 0.0192 | 0.0627 | 0.1850 | 0.4543 | 0.6056 |
 | `slru` | 0.0049 | 0.0087 | 0.0175 | 0.0708 | 0.2604 | 0.6056 |
 | `priority` | 0.0072 | 0.0192 | 0.0627 | 0.1850 | 0.4543 | 0.6056 |
+| `depth_lru` | 0.0075 | 0.0201 | 0.0641 | 0.1860 | 0.4565 | 0.6056 |
 | `random` | 0.0065 | 0.0175 | 0.0533 | 0.1472 | 0.3680 | 0.6056 |
 | `mru` | 0.0024 | 0.0056 | 0.0118 | 0.0393 | 0.1476 | 0.6056 |
 | `filo` | 0.0024 | 0.0056 | 0.0118 | 0.0393 | 0.1476 | 0.6056 |
@@ -49,12 +50,14 @@ Using `(tc_belady - baseline) / tc_belady` on token hit rate:
 | `fifo` | 80.2% | 1271 |
 | `slru` | 92.2% | 5061 |
 | `priority` | 80.2% | 1271 |
+| `depth_lru` | 79.3% | 1271 |
 | `random` | 82.0% | 1271 |
 | `mru` | 94.7% | 5061 |
 | `filo` | 94.7% | 5061 |
 
 ## Notes
 - `tc_belady` dominates every online policy at every reported cache size under the fixed-block model.
+- `depth_lru` is consistently but only slightly better than plain `lru`; it does not materially close the gap.
 - `lru`, `fifo`, and `priority` are numerically identical on this trace.
 - `lfu` and `slru` are numerically identical on this trace.
 - `mru` and `filo` are numerically identical on this trace.
