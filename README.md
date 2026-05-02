@@ -133,11 +133,11 @@ python scripts/04_plot.py \
 
 ## Important modeling note
 
-The current simulator is intentionally simplified relative to production SGLang:
+The simulator uses page/block-aligned prefix-cache accounting, which is aligned with SGLang's `page_size` model: a page groups tokens into a KV-cache block, prefix reuse requires complete pages, and `page_size = 1` gives token-level matching. The simplifications are elsewhere:
 
-- fixed-size block accounting
-- leaf-block eviction
-- no lock-state modeling
+- no production KV allocator state
+- no lock/reference-state modeling
+- no host/device cache hierarchy
 - no extra-key namespaces
 - no Eagle/bigram mode
 
